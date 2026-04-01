@@ -129,43 +129,43 @@ address: {
 )
 
 // Pre-save hook: recompute total, push status history if changed
-OrderSchema.pre("save", function (next) {
-  try {
-    // recompute total
-    if (Array.isArray(this.items) && this.items.length) {
-      const sum = this.items.reduce(
-        (acc, it) => acc + (Number(it.qty || 0) * Number(it.price || 0)),
-        0
-      )
-      this.total = sum
-    } else {
-      this.total = 0
-    }
+// OrderSchema.pre("save", function (next) {
+//   try {
+//     // recompute total
+//     if (Array.isArray(this.items) && this.items.length) {
+//       const sum = this.items.reduce(
+//         (acc, it) => acc + (Number(it.qty || 0) * Number(it.price || 0)),
+//         0
+//       )
+//       this.total = sum
+//     } else {
+//       this.total = 0
+//     }
 
-    // sync payment amount
-if (this.payment) {
-  this.payment.amount = this.total
+//     // sync payment amount
+// if (this.payment) {
+//   this.payment.amount = this.total
 
-  if (this.payment.status === "paid" && !this.payment.paidAt) {
-    this.payment.paidAt = new Date()
-  }
-}
+//   if (this.payment.status === "paid" && !this.payment.paidAt) {
+//     this.payment.paidAt = new Date()
+//   }
+// }
 
-    // push history entry when status changed (document saves)
-    if (typeof this.isModified === "function" && this.isModified("status")) {
-      this.history = this.history || []
-      this.history.push({ status: this.status, changedAt: new Date() })
-    }
+//     // push history entry when status changed (document saves)
+//     if (typeof this.isModified === "function" && this.isModified("status")) {
+//       this.history = this.history || []
+//       this.history.push({ status: this.status, changedAt: new Date() })
+//     }
 
-    // set timestamps (mongoose already does this, but safe)
-    this.updatedAt = new Date()
-    if (!this.createdAt) this.createdAt = new Date()
+//     // set timestamps (mongoose already does this, but safe)
+//     this.updatedAt = new Date()
+//     if (!this.createdAt) this.createdAt = new Date()
 
-    return next()
-  } catch (err) {
-    return next(err)
-  }
-})
+//     return next()
+//   } catch (err) {
+//     return next(err)
+//   }
+// })
 
 // Ensure findOneAndUpdate (used by findByIdAndUpdate) keeps total/history/timestamps in sync
 OrderSchema.pre("findOneAndUpdate", function () {
@@ -287,6 +287,7 @@ if (update.$set && update.$set.total && update.$set["payment.amount"] === undefi
 
     // write back the resolved update
     this.setUpdate(update)
+    next();
   } catch (err) {
     console.error("Order pre-findOneAndUpdate error (conflict-resolver):", err)
   }

@@ -12,7 +12,7 @@ export const createOrder = async (req, res) => {
     } = req.body;
 
     const order = await Order.create({
-      vendorId: "YOUR_DEFAULT_VENDOR_ID",
+      vendorId: "6962ad3e962db6a05ddb10dd",
 
       customerName,
       customerPhone,
@@ -29,7 +29,8 @@ export const createOrder = async (req, res) => {
 
     res.json(order);
   } catch (err) {
-    res.status(500).json({ message: "Order failed" });
+    console.error("ORDER ERROR:", err);
+    res.status(500).json({ message: err.message });
   }
 };
 

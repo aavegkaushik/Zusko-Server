@@ -1,4 +1,5 @@
 import express from "express";
+import {protect} from "../middleware/jwt.middleware.js"
 import {
   createOrder,
   getOrdersByPhone,
