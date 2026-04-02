@@ -1,6 +1,7 @@
 import Order from "../models/order.model.js";
 
 export const createOrder = async (req, res) => {
+  
   try {
     const {
       items,
@@ -11,19 +12,36 @@ export const createOrder = async (req, res) => {
       paymentMethod,
     } = req.body;
 
+    // ✅ Format items (VERY IMPORTANT)
+    const formattedItems = items.map((item) => ({
+      name: item.name,
+      qty: item.qty,
+      price: item.price,
+      service: item.service, // ✅ FIXED
+    }));
+
+    // ✅ Calculate total safely
+    const total = formattedItems.reduce(
+      (acc, item) => acc + item.qty * item.price,
+      0
+    );
+
     const order = await Order.create({
       vendorId: "6962ad3e962db6a05ddb10dd",
 
       customerName,
       customerPhone,
 
-      items,
+      items: formattedItems, // ✅ use formatted items
+      total,
+
       pickup,
       address,
 
       payment: {
         method: paymentMethod,
         status: paymentMethod === "COD" ? "cod" : "pending",
+        amount: total,
       },
     });
 
