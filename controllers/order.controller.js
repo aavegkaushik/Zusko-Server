@@ -25,10 +25,12 @@ export const createOrder = async (req, res) => {
       (acc, item) => acc + item.qty * item.price,
       0
     );
+    const orderId =
+      "ZSK" + Date.now().toString().slice(-6); 
 
     const order = await Order.create({
       vendorId: "6962ad3e962db6a05ddb10dd",
-
+      orderId,
       customerName,
       customerPhone,
 
