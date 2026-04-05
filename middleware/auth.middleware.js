@@ -1,7 +1,16 @@
 import jwt from "jsonwebtoken";
 
 export const protect = (req, res, next) => {
-  const token = req.headers.authorization;
+  const authHeader = req.header("Authorization");
+
+if (!authHeader) {
+  return res.status(401).json({ message: "No token" });
+}
+
+const token = authHeader.startsWith("Bearer ")
+  ? authHeader.split(" ")[1]
+  : authHeader;
+
 
   if (!token) return res.status(401).json({ message: "No token" });
 
