@@ -64,3 +64,20 @@ export const getAllOrders = async (req, res) => {
   const orders = await Order.find().sort({ createdAt: -1 });
   res.json(orders);
 };
+
+export const trackOrder = async (req, res) => {
+  try {
+    console.log("USER:", req.user);
+
+    const order = await Order.findOne({ user: req.user._id })
+      .sort({ createdAt: -1 });
+
+    if (!order) {
+      return res.status(404).json({ message: "No orders found" });
+    }
+
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+}
