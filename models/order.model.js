@@ -1,17 +1,17 @@
 // backend/models/Order.js (fixed)
-import mongoose from "mongoose"
+import mongoose from "mongoose";
 
-const { Schema } = mongoose
+const { Schema } = mongoose;
 
 const ItemSchema = new Schema(
   {
     name: { type: String, required: true },
     qty: { type: Number, required: true, min: 1 },
     price: { type: Number, required: true, min: 0 },
-    service: { type: String, required: true }
+    service: { type: String, required: true },
   },
-  { _id: false }
-)
+  { _id: false },
+);
 
 // === Update: include all statuses used by routes ===
 const STATUS_ENUM = [
@@ -21,16 +21,16 @@ const STATUS_ENUM = [
   "out-for-delivery",
   "completed",
   "cancelled",
-]
+];
 
 const PAYMENT_STATUS_ENUM = [
-  "pending",        // Order created but payment not initiated
-  "initiated",      // Payment gateway started
-  "paid",           // Money received successfully
-  "failed",         // Payment failed
-  "refunded",       // Money refunded
-  "cod"             // Cash on delivery
-]
+  "pending", // Order created but payment not initiated
+  "initiated", // Payment gateway started
+  "paid", // Money received successfully
+  "failed", // Payment failed
+  "refunded", // Money refunded
+  "cod", // Cash on delivery
+];
 
 const OrderSchema = new Schema(
   {
@@ -40,15 +40,30 @@ const OrderSchema = new Schema(
       required: true,
       index: true,
     },
+    orderId: {
+      type: String,
+      required: true,
+      unique: true,
+    },
 
     customerName: { type: String, default: "Guest" },
     customerPhone: { type: String },
     customerId: {
-  type: Schema.Types.ObjectId,
-  ref: "User",
-},
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
 
-    
+    pickup: {
+      date: String,
+      time: String,
+    },
+
+    address: {
+      fullAddress: String,
+      landmark: String,
+      city: String,
+      pincode: String,
+    },
 
     items: { type: [ItemSchema], default: [] },
 
@@ -57,47 +72,35 @@ const OrderSchema = new Schema(
     //Payment Status
     payment: {
       status: {
-    type: String,
-    enum: PAYMENT_STATUS_ENUM,
-    default: "pending",
-    index: true,
-  },
+        type: String,
+        enum: PAYMENT_STATUS_ENUM,
+        default: "pending",
+        index: true,
+      },
 
-  method: {
-    type: String, // UPI, Razorpay, COD, Wallet, etc
-  },
+      method: {
+        type: String, // UPI, Razorpay, COD, Wallet, etc
+      },
 
-  transactionId: {
-    type: String,
-    index: true,
-  },
+      transactionId: {
+        type: String,
+        index: true,
+      },
 
-  amount: {
-    type: Number,
-    min: 0,
-    default: 0,
-  },
-  pickup: {
-  date: String,
-  time: String,
-},
+      amount: {
+        type: Number,
+        min: 0,
+        default: 0,
+      },
 
-address: {
-  fullAddress: String,
-  landmark: String,
-  city: String,
-  pincode: String,
-},
+      paidAt: {
+        type: Date,
+      },
 
-  paidAt: {
-    type: Date,
-  },
-
-  refundedAt: {
-    type: Date,
-  },
-},
-
+      refundedAt: {
+        type: Date,
+      },
+    },
 
     // === Use canonical enum that matches your routes ===
     status: {
@@ -126,8 +129,8 @@ address: {
       default: [],
     },
   },
-  { timestamps: { createdAt: "createdAt", updatedAt: "updatedAt" } }
-)
+  { timestamps: { createdAt: "createdAt", updatedAt: "updatedAt" } },
+);
 
 // Pre-save hook: recompute total, push status history if changed
 // OrderSchema.pre("save", function (next) {
@@ -172,8 +175,8 @@ address: {
 OrderSchema.pre("findOneAndUpdate", function () {
   // `this` is the query
   try {
-    const update = this.getUpdate()
-    if (!update) return
+    const update = this.getUpdate();
+    if (!update) return;
 
     // canonicalize helpers
     const normalize = (s) =>
@@ -181,42 +184,58 @@ OrderSchema.pre("findOneAndUpdate", function () {
         .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
-        .replace(/(^-|-$)/g, "")
+        .replace(/(^-|-$)/g, "");
 
     // ensure $set and $push exist for consistent handling
-    update.$set = update.$set || {}
-    update.$push = update.$push || {}
+    update.$set = update.$set || {};
+    update.$push = update.$push || {};
 
     // ---------- handle items -> recompute total if items replaced ----------
     const itemsBeingSet =
-      (update.$set && Array.isArray(update.$set.items)) || Array.isArray(update.items)
+      (update.$set && Array.isArray(update.$set.items)) ||
+      Array.isArray(update.items);
     if (itemsBeingSet) {
-      const items = Array.isArray(update.$set.items) ? update.$set.items : update.items
-      const sum = items.reduce((acc, it) => acc + (Number(it.qty || 0) * Number(it.price || 0)), 0)
-      update.$set.total = sum
+      const items = Array.isArray(update.$set.items)
+        ? update.$set.items
+        : update.items;
+      const sum = items.reduce(
+        (acc, it) => acc + Number(it.qty || 0) * Number(it.price || 0),
+        0,
+      );
+      update.$set.total = sum;
       // remove top-level total to avoid conflicts
-      if (typeof update.total !== "undefined") delete update.total
-      if (typeof update.items !== "undefined") delete update.items
+      if (typeof update.total !== "undefined") delete update.total;
+      if (typeof update.items !== "undefined") delete update.items;
     }
 
     // ---------- canonicalize status ----------
     // read status from $set OR top-level
-    const rawStatus = (update.$set && update.$set.status) || update.status || null
-    let finalStatus = null
+    const rawStatus =
+      (update.$set && update.$set.status) || update.status || null;
+    let finalStatus = null;
     if (rawStatus) {
-      const matched = STATUS_ENUM.find((s) => normalize(s) === normalize(rawStatus))
-      finalStatus = matched || rawStatus
-      update.$set.status = finalStatus
-      if (update.status) delete update.status
+      const matched = STATUS_ENUM.find(
+        (s) => normalize(s) === normalize(rawStatus),
+      );
+      finalStatus = matched || rawStatus;
+      update.$set.status = finalStatus;
+      if (update.status) delete update.status;
     }
 
     // ---------- prepare history entry ----------
-    const historyEntry = finalStatus ? { status: finalStatus, changedAt: new Date() } : null
+    const historyEntry = finalStatus
+      ? { status: finalStatus, changedAt: new Date() }
+      : null;
 
     // ---------- resolve conflicts between $set.history, top-level history, and $push.history ----------
-    const topLevelHistory = Array.isArray(update.history) ? update.history : null
-    const setHistory = Array.isArray(update.$set.history) ? update.$set.history : null
-    const pushHistory = update.$push && update.$push.history ? update.$push.history : null
+    const topLevelHistory = Array.isArray(update.history)
+      ? update.history
+      : null;
+    const setHistory = Array.isArray(update.$set.history)
+      ? update.$set.history
+      : null;
+    const pushHistory =
+      update.$push && update.$push.history ? update.$push.history : null;
 
     if (historyEntry) {
       if (topLevelHistory || setHistory) {
@@ -224,79 +243,104 @@ OrderSchema.pre("findOneAndUpdate", function () {
         const base = Array.isArray(setHistory)
           ? setHistory.slice()
           : Array.isArray(topLevelHistory)
-          ? topLevelHistory.slice()
-          : []
-        base.push(historyEntry)
-        update.$set.history = base
-        if (update.history) delete update.history
-        if (update.$push && update.$push.history) delete update.$push.history
+            ? topLevelHistory.slice()
+            : [];
+        base.push(historyEntry);
+        update.$set.history = base;
+        if (update.history) delete update.history;
+        if (update.$push && update.$push.history) delete update.$push.history;
       } else if (pushHistory) {
         // $push.history already present - may be object or array
         if (Array.isArray(pushHistory)) {
-          const base = pushHistory.slice()
-          base.push(historyEntry)
-          update.$set.history = base
-          delete update.$push.history
+          const base = pushHistory.slice();
+          base.push(historyEntry);
+          update.$set.history = base;
+          delete update.$push.history;
         } else {
           // if $push.history is an object like { $each: [...] }, merge into $each
-          if (typeof pushHistory === "object" && pushHistory.$each && Array.isArray(pushHistory.$each)) {
-            pushHistory.$each.push(historyEntry)
-            update.$push.history = pushHistory
+          if (
+            typeof pushHistory === "object" &&
+            pushHistory.$each &&
+            Array.isArray(pushHistory.$each)
+          ) {
+            pushHistory.$each.push(historyEntry);
+            update.$push.history = pushHistory;
           } else {
             // simple case: $push.history is a single entry -> convert to $push with $each
-            update.$push.history = { $each: [pushHistory, historyEntry] }
+            update.$push.history = { $each: [pushHistory, historyEntry] };
           }
         }
       } else {
         // nothing present: safe to $push our entry (object form is accepted)
-        update.$push.history = historyEntry
+        update.$push.history = historyEntry;
       }
     }
 
     // ---------- pickedAt / deliveredAt and updatedAt ----------
-    if (finalStatus === "in-progress" && !("pickedAt" in update.$set) && !("pickedAt" in update)) {
-      update.$set.pickedAt = new Date()
-      if (update.pickedAt) delete update.pickedAt
+    if (
+      finalStatus === "in-progress" &&
+      !("pickedAt" in update.$set) &&
+      !("pickedAt" in update)
+    ) {
+      update.$set.pickedAt = new Date();
+      if (update.pickedAt) delete update.pickedAt;
     }
-    if (finalStatus === "completed" && !("deliveredAt" in update.$set) && !("deliveredAt" in update)) {
-      update.$set.deliveredAt = new Date()
-      if (update.deliveredAt) delete update.deliveredAt
+    if (
+      finalStatus === "completed" &&
+      !("deliveredAt" in update.$set) &&
+      !("deliveredAt" in update)
+    ) {
+      update.$set.deliveredAt = new Date();
+      if (update.deliveredAt) delete update.deliveredAt;
     }
 
     // always set updatedAt
-    update.$set.updatedAt = new Date()
+    update.$set.updatedAt = new Date();
 
     // clean up possible conflicting top-level fields that clash with $set
-    if (typeof update.total !== "undefined" && typeof update.$set.total !== "undefined") {
-      delete update.total
+    if (
+      typeof update.total !== "undefined" &&
+      typeof update.$set.total !== "undefined"
+    ) {
+      delete update.total;
     }
-    if (typeof update.status !== "undefined" && typeof update.$set.status !== "undefined") {
-      delete update.status
+    if (
+      typeof update.status !== "undefined" &&
+      typeof update.$set.status !== "undefined"
+    ) {
+      delete update.status;
     }
-    if (typeof update.history !== "undefined" && typeof update.$set.history !== "undefined") {
-      delete update.history
+    if (
+      typeof update.history !== "undefined" &&
+      typeof update.$set.history !== "undefined"
+    ) {
+      delete update.history;
     }
 
     // ---------- payment sync ----------
-if (update.$set && update.$set["payment.status"] === "paid") {
-  update.$set["payment.paidAt"] = new Date()
-}
+    if (update.$set && update.$set["payment.status"] === "paid") {
+      update.$set["payment.paidAt"] = new Date();
+    }
 
-if (update.$set && update.$set.total && update.$set["payment.amount"] === undefined) {
-  update.$set["payment.amount"] = update.$set.total
-}
+    if (
+      update.$set &&
+      update.$set.total &&
+      update.$set["payment.amount"] === undefined
+    ) {
+      update.$set["payment.amount"] = update.$set.total;
+    }
 
     // write back the resolved update
-    this.setUpdate(update)
+    this.setUpdate(update);
     next();
   } catch (err) {
-    console.error("Order pre-findOneAndUpdate error (conflict-resolver):", err)
+    console.error("Order pre-findOneAndUpdate error (conflict-resolver):", err);
   }
-})
+});
 
 // helper static
 OrderSchema.statics.getAllowedStatuses = function () {
-  return STATUS_ENUM.slice()
-}
+  return STATUS_ENUM.slice();
+};
 
-export default mongoose.models.Order || mongoose.model("Order", OrderSchema)
+export default mongoose.models.Order || mongoose.model("Order", OrderSchema);
