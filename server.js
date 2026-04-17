@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 
 import authRoutes from "./routes/auth.routes.js";
 import orderRoutes from "./routes/order.routes.js";
-
+import paymentRoute from './routes/payment.routes.js'
 dotenv.config();
 
 const app = express();
@@ -18,6 +18,7 @@ app.use("/api/health", (req, res) => {
 })
 app.use("/api/auth", authRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/payment", paymentRoute);
 
 mongoose
   .connect(process.env.MONGO_URI)
