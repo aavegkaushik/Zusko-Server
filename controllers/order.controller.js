@@ -1,49 +1,59 @@
 import Order from "../models/order.model.js";
 
 export const createOrder = async (req, res) => {
-  
   try {
     const {
-      items,
       customerName,
       customerPhone,
-      pickup,
       address,
-      paymentMethod,
+      items,
+      total, // ✅ this is finalAmount from frontend
+      discount = 0,
+      deliveryFee = 0,
+      payment,
     } = req.body;
 
-    // ✅ Format items (VERY IMPORTANT)
+    // ✅ Format items
     const formattedItems = items.map((item) => ({
       name: item.name,
       qty: item.qty,
       price: item.price,
-      service: item.service, // ✅ FIXED
+      service: item.service,
     }));
 
-    // ✅ Calculate total safely
-    const total = formattedItems.reduce(
+    // ✅ Calculate original total (for validation only)
+    const originalTotal = formattedItems.reduce(
       (acc, item) => acc + item.qty * item.price,
-      0
+      0,
     );
-    const orderId =
-      "ZSK" + Date.now().toString().slice(-6); 
+
+    // ✅ Final amount (IMPORTANT)
+    const finalAmount = total;
+
+    const orderId = "ZSK" + Date.now().toString().slice(-6);
 
     const order = await Order.create({
       vendorId: "6962ad3e962db6a05ddb10dd",
       orderId,
+
       customerName,
       customerPhone,
 
-      items: formattedItems, // ✅ use formatted items
-      total,
+      items: formattedItems,
 
-      pickup,
+      // ✅ STORE EVERYTHING
+      total: finalAmount, // final price
+      originalTotal, // before discount
+      discount,
+      deliveryFee,
+
       address,
 
       payment: {
-        method: paymentMethod,
-        status: paymentMethod === "COD" ? "cod" : "pending",
-        amount: total,
+        method: payment?.method || "COD",
+        status:
+          payment?.status || (payment?.method === "COD" ? "cod" : "pending"),
+        amount: finalAmount,
       },
     });
 
@@ -71,8 +81,9 @@ export const trackOrder = async (req, res) => {
   try {
     console.log("USER:", req.user);
 
-    const order = await Order.findOne({ user: req.user._id })
-      .sort({ createdAt: -1 });
+    const order = await Order.findOne({ user: req.user._id }).sort({
+      createdAt: -1,
+    });
 
     if (!order) {
       return res.status(404).json({ message: "No orders found" });
@@ -82,4 +93,4 @@ export const trackOrder = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
-}
+};
