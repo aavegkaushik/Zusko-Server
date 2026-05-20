@@ -13,7 +13,6 @@ import { generalLimiter } from "./middleware/rateLimiter.js";
 import errorHandler from "./middleware/error.middleware.js";
 import helmet from "helmet";
 import hpp from "hpp";
-import xssClean from 'xss-clean'
 dotenv.config();
 
 const app = express();
@@ -23,7 +22,6 @@ app.use(cors({
   credentials: true
 }));
 app.use(helmet());
-app.use(xssClean());
 app.use(hpp());
 app.use(express.json());
 app.use("/api/health", (req, res) => {

@@ -1,4 +1,5 @@
 import Order from "../models/order.model.js";
+import { sendTelegramAlert } from "../services/telegramService.js";
 // GET ACTIVE ORDERS
 export const getActiveOrders = async (req, res) => {
   try {
@@ -278,6 +279,9 @@ export const createOrder = async (req, res) => {
         },
       ],
     });
+
+    // Send telegram alert in background
+    sendTelegramAlert(order);
 
     res.status(201).json({
       success: true,
