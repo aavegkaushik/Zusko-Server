@@ -1,4 +1,3 @@
-// backend/models/Order.js (fixed)
 import mongoose from "mongoose";
 
 const { Schema } = mongoose;
@@ -51,6 +50,7 @@ const OrderSchema = new Schema(
     customerId: {
       type: Schema.Types.ObjectId,
       ref: "User",
+      index: true,
     },
 
     pickup: {
@@ -101,6 +101,32 @@ const OrderSchema = new Schema(
         type: Date,
       },
     },
+
+    rating: {
+      stars: {
+        type: Number,
+        min: 1,
+        max: 5,
+      },
+
+      review: {
+        type: String,
+        default: "",
+      },
+
+      ratedAt: Date,
+    },
+
+    deliveryAgent: {
+      name: String,
+      phone: String,
+      agentId: {
+        type: Schema.Types.ObjectId,
+        ref: "User",
+      },
+    },
+    estimatedDelivery: Date,
+    invoiceUrl: String,
 
     // === Use canonical enum that matches your routes ===
     status: {

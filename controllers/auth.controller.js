@@ -1,50 +1,66 @@
 import User from "../models/user.model.js";
+import Session from "../models/session.model.js";
 import jwt from "jsonwebtoken";
+import { UAParser } from "ua-parser-js";
 
-// 🔐 Generate JWT Token
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: "7d",
   });
 };
 
-// 📲 Register / Login (phone-based)
 export const loginUser = async (req, res) => {
   try {
     const { name, phone, email } = req.body;
 
-    // ✅ Validation
     if (!phone) {
-      return res.status(400).json({ message: "Phone is required" });
+      return res.status(400).json({
+        success: false,
+        message: "Phone is required",
+      });
     }
 
-    // 🔍 Check existing user
     let user = await User.findOne({ phone });
 
     if (!user) {
-      // 🆕 Create new user
       user = await User.create({
         name: name || "Guest",
         phone,
         email: email || "",
       });
     } else {
-      // 🔄 Update missing fields (smart update)
-      if (name && !user.name) user.name = name;
-      if (email && !user.email) user.email = email;
+      if (name) user.name = name;
+      if (email) user.email = email;
 
       await user.save();
     }
 
-    // 🔐 Send response with token
+    const token = generateToken(user._id);
+
+    // Parse device info
+    const parser = new UAParser(req.headers["user-agent"]);
+    const browser = parser.getBrowser().name || "Unknown Browser";
+    const os = parser.getOS().name || "Unknown Device";
+
+    await Session.create({
+      userId: user._id,
+      token,
+      device: os,
+      browser,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] || "",
+      lastActive: new Date(),
+    });
+
     res.status(200).json({
       success: true,
       user,
-      token: generateToken(user._id),
+      token,
     });
-
   } catch (error) {
-    console.error("AUTH ERROR:", error);
+    console.error("AUTH ERROR FULL:", error);
+    console.error(error.message);
+
     res.status(500).json({
       success: false,
       message: "Something went wrong",
