@@ -24,6 +24,9 @@ app.use(cors({
 app.use(helmet());
 app.use(hpp());
 app.use(express.json());
+app.use("/version", (req, res) => {
+  res.send("Version June 5");
+});
 app.use("/api/health", (req, res) => {
   res.send("API is running.")
   res.status(200).json({ message: "API is running" });
