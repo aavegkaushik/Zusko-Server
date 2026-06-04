@@ -47,6 +47,20 @@ const OrderSchema = new Schema(
 
     customerName: { type: String, default: "Guest" },
     customerPhone: { type: String },
+    pickupContact: {
+  name: {
+    type: String,
+    default: "",
+  },
+  phone: {
+    type: String,
+    default: "",
+  },
+  isAlternate: {
+    type: Boolean,
+    default: false,
+  },
+},
     customerId: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -55,7 +69,7 @@ const OrderSchema = new Schema(
 
     pickup: {
       date: String,
-      time: String,
+      time: String
     },
 
     address: {

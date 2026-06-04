@@ -26,44 +26,44 @@ export const loginUser = async (req, res) => {
       user = await User.create({
         name: name || "Guest",
         phone,
-        email: email || "",
+        email,
       });
     } else {
       if (name) user.name = name;
-      if (email) user.email = email;
+      if (email) {
+  const existingEmailUser = await User.findOne({ email });
+
+  // Only update email if it belongs to the same user
+  if (
+    !existingEmailUser ||
+    existingEmailUser._id.toString() === user._id.toString()
+  ) {
+    user.email = email;
+  }
+}
 
       await user.save();
     }
 
     const token = generateToken(user._id);
 
-    // Parse device info
-    const parser = new UAParser(req.headers["user-agent"]);
-    const browser = parser.getBrowser().name || "Unknown Browser";
-    const os = parser.getOS().name || "Unknown Device";
-
     await Session.create({
       userId: user._id,
       token,
-      device: os,
-      browser,
-      ip: req.ip,
-      userAgent: req.headers["user-agent"] || "",
       lastActive: new Date(),
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       user,
       token,
     });
   } catch (error) {
-    console.error("AUTH ERROR FULL:", error);
-    console.error(error.message);
+    console.error("LOGIN ERROR:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: "Something went wrong",
+      message: error.message,
     });
   }
 };

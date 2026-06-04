@@ -27,14 +27,11 @@ export const getActiveOrders = async (req, res) => {
 export const getOrderHistory = async (req, res) => {
   try {
     const orders = await Order.find({
-  $or: [
-    { customerId: req.user._id },
-    { customerPhone: req.user.phone },
-  ],
-  status: {
-    $in: ["completed", "cancelled"],
-  },
-}).sort({ createdAt: -1 });
+      $or: [{ customerId: req.user._id }, { customerPhone: req.user.phone }],
+      status: {
+        $in: ["completed", "cancelled"],
+      },
+    }).sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -54,10 +51,7 @@ export const getOrderTracking = async (req, res) => {
   try {
     const order = await Order.findOne({
       _id: req.params.id,
-      $or: [
-  { customerId: req.user._id },
-  { customerPhone: req.user.phone },
-]
+      $or: [{ customerId: req.user._id }, { customerPhone: req.user.phone }],
     });
 
     if (!order) {
@@ -94,12 +88,9 @@ export const getOrderTracking = async (req, res) => {
 export const cancelOrder = async (req, res) => {
   try {
     const order = await Order.findOne({
-  _id: req.params.id,
-  $or: [
-    { customerId: req.user._id },
-    { customerPhone: req.user.phone },
-  ],
-});
+      _id: req.params.id,
+      $or: [{ customerId: req.user._id }, { customerPhone: req.user.phone }],
+    });
 
     if (!order) {
       return res.status(404).json({
@@ -152,12 +143,9 @@ export const rateOrder = async (req, res) => {
     const { stars, review } = req.body;
 
     const order = await Order.findOne({
-  _id: req.params.id,
-  $or: [
-    { customerId: req.user._id },
-    { customerPhone: req.user.phone },
-  ],
-});
+      _id: req.params.id,
+      $or: [{ customerId: req.user._id }, { customerPhone: req.user.phone }],
+    });
 
     if (!order) {
       return res.status(404).json({
@@ -213,6 +201,8 @@ export const createOrder = async (req, res) => {
     const {
       customerName,
       customerPhone,
+      pickupContact,
+      pickup,
       address,
       items,
       total,
@@ -254,6 +244,11 @@ export const createOrder = async (req, res) => {
 
       customerName: customerName || req.user?.name || "Guest",
       customerPhone: customerPhone || req.user?.phone || "",
+      pickupContact: pickupContact || {
+        name: customerName || req.user?.name || "",
+        phone: customerPhone || req.user?.phone || "",
+        isAlternate: false,
+      },
 
       items: formattedItems,
 
@@ -263,6 +258,7 @@ export const createOrder = async (req, res) => {
       deliveryFee,
 
       address,
+      pickup,
 
       payment: {
         method: payment?.method || "COD",

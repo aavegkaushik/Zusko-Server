@@ -11,9 +11,9 @@ export const signupValidation = [
     .withMessage("Invalid email")
     .normalizeEmail(),
 
-  body("password")
-    .isLength({ min: 6 })
-    .withMessage("Password must be at least 6 chars"),
+  body("phone")
+    .isLength({ max: 10 })
+    .withMessage("Enter a valid mobile number"),
 ];
 
 export const loginValidation = [
@@ -21,9 +21,13 @@ export const loginValidation = [
     .isEmail()
     .withMessage("Invalid email"),
 
-  body("password")
+    body("name")
     .notEmpty()
-    .withMessage("Password required"),
+    .withMessage("Name is required"),
+
+  body("phone")
+    .notEmpty()
+    .withMessage("Phone Number is required"),
 ];
 
 export const validate = (req, res, next) => {
