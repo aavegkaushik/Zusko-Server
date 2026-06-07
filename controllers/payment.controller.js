@@ -5,8 +5,8 @@ import Order from "../models/order.model.js";
 import dotenv from "dotenv";
 dotenv.config();
 
-console.log("KEY =", JSON.stringify(process.env.RAZORPAY_KEY_ID));
-console.log("SECRET =", JSON.stringify(process.env.RAZORPAY_KEY_SECRET));
+// console.log("KEY =", JSON.stringify(process.env.RAZORPAY_KEY_ID));
+// console.log("SECRET =", JSON.stringify(process.env.RAZORPAY_KEY_SECRET));
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
