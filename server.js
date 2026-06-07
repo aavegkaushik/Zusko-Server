@@ -18,7 +18,7 @@ dotenv.config();
 const app = express();
 
 app.use(cors({
-  origin: ["http://localhost:5173", "https://zusko.in"],
+  origin: ["http://localhost:5173", "https://zusko.in", "https://www.zusko.in"],
   credentials: true
 }));
 app.use(helmet());
@@ -40,6 +40,7 @@ app.use("/api/payment", paymentRoute);
 app.use("/api/addresses", addressRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/security", securityRoutes);
+app.use(errorHandler);
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {
