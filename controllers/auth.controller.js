@@ -13,34 +13,36 @@ export const loginUser = async (req, res) => {
   try {
     const { name, phone, email } = req.body;
 
-    if (!phone) {
+    if (!email) {
       return res.status(400).json({
         success: false,
-        message: "Phone is required",
+        message: "Email is required",
       });
     }
 
-    let user = await User.findOne({ phone });
+    let user = await User.findOne({
+      email: email.toLowerCase(),
+    });
 
+    // New User
     if (!user) {
       user = await User.create({
         name: name || "Guest",
+        email: email.toLowerCase(),
         phone,
-        email,
       });
-    } else {
-      if (name) user.name = name;
-      if (email) {
-  const existingEmailUser = await User.findOne({ email });
+    }
 
-  // Only update email if it belongs to the same user
-  if (
-    !existingEmailUser ||
-    existingEmailUser._id.toString() === user._id.toString()
-  ) {
-    user.email = email;
-  }
-}
+    // Existing User
+    else {
+      if (name) {
+        user.name = name;
+      }
+
+      // Update phone if changed
+      if (phone && phone !== user.phone) {
+        user.phone = phone;
+      }
 
       await user.save();
     }
@@ -58,6 +60,7 @@ export const loginUser = async (req, res) => {
       user,
       token,
     });
+
   } catch (error) {
     console.error("LOGIN ERROR:", error);
 

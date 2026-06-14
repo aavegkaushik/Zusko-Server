@@ -47,6 +47,11 @@ const OrderSchema = new Schema(
 
     customerName: { type: String, default: "Guest" },
     customerPhone: { type: String },
+    customerEmail: {
+  type: String,
+  required: true,
+},
+    
     pickupContact: {
   name: {
     type: String,

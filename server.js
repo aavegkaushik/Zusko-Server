@@ -11,6 +11,7 @@ import addressRoutes from './routes/addressRoutes.js'
 import securityRoutes from "./routes/securityRoutes.js";
 import { generalLimiter } from "./middleware/rateLimiter.js";
 import errorHandler from "./middleware/error.middleware.js";
+import careerRoutes from "./routes/career.routes.js";
 import helmet from "helmet";
 import hpp from "hpp";
 dotenv.config();
@@ -18,14 +19,14 @@ dotenv.config();
 const app = express();
 
 app.use(cors({
-  origin: ["http://localhost:5173", "https://zusko.in", "https://www.zusko.in"],
+  origin: ["http://localhost:5173", "http://localhost:5174",  "https://zusko.in", "https://www.zusko.in"],
   credentials: true
 }));
 app.use(helmet());
 app.use(hpp());
 app.use(express.json());
 app.use("/version", (req, res) => {
-  res.send("Version June 5");
+  res.send("Version June 14");
 });
 app.use("/api/health", (req, res) => {
   res.send("API is running.")
@@ -39,6 +40,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/payment", paymentRoute);
 app.use("/api/addresses", addressRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/careers", careerRoutes);
 app.use("/api/security", securityRoutes);
 app.use(errorHandler);
 mongoose

@@ -1,5 +1,8 @@
 import Order from "../models/order.model.js";
 import { sendTelegramAlert } from "../services/telegramService.js";
+import User from "../models/User.model.js";
+import { sendEmail } from "../utils/sendEmail.js";
+import { generateOrderPlacedEmail } from "../utils/orderEmails.js";
 // GET ACTIVE ORDERS
 export const getActiveOrders = async (req, res) => {
   try {
@@ -227,7 +230,7 @@ export const createOrder = async (req, res) => {
 
     const originalTotal = formattedItems.reduce(
       (acc, item) => acc + item.qty * item.price,
-      0,
+      0
     );
 
     const finalAmount = total;
@@ -239,16 +242,20 @@ export const createOrder = async (req, res) => {
 
       orderId,
 
-      // IMPORTANT FIX
       customerId: req.user?._id,
 
       customerName: customerName || req.user?.name || "Guest",
+
       customerPhone: customerPhone || req.user?.phone || "",
-      pickupContact: pickupContact || {
-        name: customerName || req.user?.name || "",
-        phone: customerPhone || req.user?.phone || "",
-        isAlternate: false,
-      },
+
+      customerEmail: req.user.email,
+
+      pickupContact:
+        pickupContact || {
+          name: customerName || req.user?.name || "",
+          phone: customerPhone || req.user?.phone || "",
+          isAlternate: false,
+        },
 
       items: formattedItems,
 
@@ -262,8 +269,13 @@ export const createOrder = async (req, res) => {
 
       payment: {
         method: payment?.method || "COD",
+
         status:
-          payment?.status || (payment?.method === "COD" ? "cod" : "pending"),
+          payment?.status ||
+          (payment?.method === "COD"
+            ? "cod"
+            : "pending"),
+
         amount: finalAmount,
       },
 
@@ -276,14 +288,55 @@ export const createOrder = async (req, res) => {
       ],
     });
 
-    // Send telegram alert in background
+    /* ==========================
+       Telegram Alert
+    ========================== */
+
     sendTelegramAlert(order);
+
+    /* ==========================
+       Send Confirmation Email
+    ========================== */
+
+    try {
+      const user = await User.findById(
+        order.customerId
+      );
+
+      if (order.customerEmail) {
+  await sendEmail({
+    to: order.customerEmail,
+
+    from:
+      process.env.ORDERS_MAIL_FROM ||
+      process.env.MAIL_FROM,
+
+    subject: `Your Zusko Order #${order.orderId} is Confirmed 🎉`,
+
+    html: generateOrderPlacedEmail(
+      order.toObject()
+    ),
+  });
+
+  console.log(
+    `Order confirmation email sent to ${order.customerEmail}`
+  );
+}
+    } catch (emailError) {
+      console.error(
+        "Order confirmation email failed:",
+        emailError.message
+      );
+
+      // Email fail hone par order rollback nahi hoga
+    }
 
     res.status(201).json({
       success: true,
       message: "Order created successfully",
       data: order,
     });
+
   } catch (err) {
     console.error("ORDER ERROR:", err);
 
