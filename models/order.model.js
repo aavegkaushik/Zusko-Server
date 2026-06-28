@@ -15,6 +15,7 @@ const ItemSchema = new Schema(
 // === Update: include all statuses used by routes ===
 const STATUS_ENUM = [
   "pending",
+  "picked-up",
   "in-progress",
   "ready-for-delivery",
   "out-for-delivery",
@@ -87,6 +88,42 @@ const OrderSchema = new Schema(
     items: { type: [ItemSchema], default: [] },
 
     total: { type: Number, min: 0, default: 0 },
+
+    originalTotal: {
+  type: Number,
+  default: 0,
+},
+
+refund: {
+  status: {
+    type: String,
+    enum: ["none", "processing", "refunded", "failed"],
+    default: "none",
+  },
+
+  refundId: String,
+
+  amount: Number,
+
+  initiatedAt: Date,
+
+  completedAt: Date,
+},
+
+discount: {
+  type: Number,
+  default: 0,
+},
+
+deliveryFee: {
+  type: Number,
+  default: 0,
+},
+
+handlingFee: {
+  type: Number,
+  default: 0,
+},
 
     //Payment Status
     payment: {
@@ -377,7 +414,6 @@ OrderSchema.pre("findOneAndUpdate", function () {
 
     // write back the resolved update
     this.setUpdate(update);
-    next();
   } catch (err) {
     console.error("Order pre-findOneAndUpdate error (conflict-resolver):", err);
   }

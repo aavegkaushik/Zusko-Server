@@ -14,15 +14,19 @@ const userSchema = new mongoose.Schema(
     lowercase: true,
     trim: true,
 },
+isEmailVerified: {
+  type: Boolean,
+  default: false,
+},
 
     phone: {
       type: String,
       unique: true,
     },
 
-    password: {
-      type: String,
-    },
+    // password: {
+    //   type: String,
+    // },
 
     avatar: {
       type: String,
@@ -89,10 +93,10 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
 
-    isEmailVerified: {
-      type: Boolean,
-      default: false,
-    },
+    // isEmailVerified: {
+    //   type: Boolean,
+    //   default: false,
+    // },
   },
   {
     timestamps: true,

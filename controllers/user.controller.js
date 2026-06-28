@@ -32,7 +32,7 @@ export const getProfile = async (req, res) => {
 // UPDATE USER PROFILE
 export const updateProfile = async (req, res) => {
   try {
-    const { name, email } = req.body;
+    const { name, email, phone } = req.body;
 
     const user = await User.findById(req.user.id);
 
@@ -44,7 +44,49 @@ export const updateProfile = async (req, res) => {
     }
 
     user.name = name || user.name;
-    user.email = email || user.email;
+
+    if (email && email !== user.email) {
+
+  const existingEmail =
+    await User.findOne({
+      email: email.toLowerCase(),
+    });
+
+  if (
+    existingEmail &&
+    existingEmail._id.toString() !==
+      user._id.toString()
+  ) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "Email already exists",
+    });
+  }
+
+  user.email = email.toLowerCase();
+}
+    // user.email = email || user.email;
+
+    if (phone && phone !== user.phone) {
+
+  const existingUser =
+    await User.findOne({ phone });
+
+  if (
+    existingUser &&
+    existingUser._id.toString() !==
+      user._id.toString()
+  ) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "Phone number already exists",
+    });
+  }
+
+  user.phone = phone;
+}
 
     await user.save();
 

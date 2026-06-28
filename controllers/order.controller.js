@@ -3,6 +3,7 @@ import { sendTelegramAlert } from "../services/telegramService.js";
 import User from "../models/User.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { generateOrderPlacedEmail } from "../utils/orderEmails.js";
+import { refundPayment } from "./payment.controller.js";
 // GET ACTIVE ORDERS
 export const getActiveOrders = async (req, res) => {
   try {
@@ -65,20 +66,44 @@ export const getOrderTracking = async (req, res) => {
     }
 
     res.status(200).json({
-      success: true,
-      data: {
-        orderId: order.orderId,
-        status: order.status,
-        pickup: order.pickup,
-        address: order.address,
-        items: order.items,
-        total: order.total,
-        payment: order.payment,
-        history: order.history,
-        estimatedDelivery: order.estimatedDelivery || null,
-        deliveryAgent: order.deliveryAgent || null,
-      },
-    });
+  success: true,
+  data: {
+    _id: order._id,
+    orderId: order.orderId,
+
+    customerName: order.customerName,
+    customerPhone: order.customerPhone,
+    customerEmail: order.customerEmail,
+
+    status: order.status,
+
+    pickup: order.pickup,
+    pickupContact: order.pickupContact,
+
+    address: order.address,
+
+    items: order.items,
+
+    originalTotal: order.originalTotal || 0,
+    handlingFee: order.handlingFee || 0,
+    deliveryFee: order.deliveryFee || 0,
+    discount: order.discount || 0,
+
+    total: order.total,
+
+    payment: order.payment,
+
+    history: order.history,
+
+    estimatedDelivery:
+      order.estimatedDelivery || null,
+
+    deliveryAgent:
+      order.deliveryAgent || null,
+
+    createdAt: order.createdAt,
+  },
+});
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -127,6 +152,25 @@ export const cancelOrder = async (req, res) => {
 
     await order.save();
 
+    if (
+    order.payment?.status === "paid"
+) {
+
+    order.refund = {
+        status: "processing",
+        amount: order.payment.amount,
+        initiatedAt: new Date(),
+    };
+
+    await order.save();
+
+    console.log(order.payment);
+console.log("Payment ID:", order.payment?.razorpayPaymentId);
+
+    await refundPayment(order);
+
+}
+
     res.status(200).json({
       success: true,
       message: "Order cancelled successfully",
@@ -147,7 +191,10 @@ export const rateOrder = async (req, res) => {
 
     const order = await Order.findOne({
       _id: req.params.id,
-      $or: [{ customerId: req.user._id }, { customerPhone: req.user.phone }],
+      $or: [
+        { customerId: req.user._id },
+        { customerPhone: req.user.phone },
+      ],
     });
 
     if (!order) {
@@ -178,21 +225,33 @@ export const rateOrder = async (req, res) => {
       });
     }
 
-    order.rating = {
+    const rating = {
       stars,
       review: review || "",
       ratedAt: new Date(),
     };
 
-    await order.save();
+    await Order.findByIdAndUpdate(
+      order._id,
+      {
+        $set: {
+          rating,
+        },
+      },
+      {
+        new: true,
+        runValidators: false,
+      }
+    );
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Rating submitted successfully",
-      data: order.rating,
+      data: rating,
     });
+
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
@@ -209,8 +268,10 @@ export const createOrder = async (req, res) => {
       address,
       items,
       total,
+      originalTotal,
       discount = 0,
       deliveryFee = 0,
+      handlingFee = 0,
       payment,
     } = req.body;
 
@@ -228,14 +289,23 @@ export const createOrder = async (req, res) => {
       service: item.service,
     }));
 
-    const originalTotal = formattedItems.reduce(
-      (acc, item) => acc + item.qty * item.price,
-      0
-    );
+    // const originalTotal = formattedItems.reduce(
+    //   (acc, item) => acc + item.qty * item.price,
+    //   0
+    // );
 
     const finalAmount = total;
 
-    const orderId = "ZSK" + Date.now().toString().slice(-6);
+    const orderId =
+      "ZSK" +
+      Date.now() +
+      Math.floor(Math.random() * 1000);
+
+      console.log({
+  customerEmail: req.user?.email,
+  customerName: req.user?.name,
+  customerPhone: req.user?.phone,
+});
 
     const order = await Order.create({
       vendorId: "6962ad3e962db6a05ddb10dd",
@@ -244,16 +314,30 @@ export const createOrder = async (req, res) => {
 
       customerId: req.user?._id,
 
-      customerName: customerName || req.user?.name || "Guest",
+      customerName:
+        customerName ||
+        req.user?.name ||
+        "Guest",
 
-      customerPhone: customerPhone || req.user?.phone || "",
+      customerPhone:
+        customerPhone ||
+        req.user?.phone ||
+        "",
 
-      customerEmail: req.user.email,
+      customerEmail: req.user?.email,
 
       pickupContact:
         pickupContact || {
-          name: customerName || req.user?.name || "",
-          phone: customerPhone || req.user?.phone || "",
+          name:
+            customerName ||
+            req.user?.name ||
+            "",
+
+          phone:
+            customerPhone ||
+            req.user?.phone ||
+            "",
+
           isAlternate: false,
         },
 
@@ -261,6 +345,7 @@ export const createOrder = async (req, res) => {
 
       total: finalAmount,
       originalTotal,
+      handlingFee,
       discount,
       deliveryFee,
 
@@ -268,15 +353,20 @@ export const createOrder = async (req, res) => {
       pickup,
 
       payment: {
-        method: payment?.method || "COD",
+        method:
+          payment?.method || "COD",
 
         status:
           payment?.status ||
           (payment?.method === "COD"
-            ? "cod"
+            ? "pending"
             : "pending"),
 
         amount: finalAmount,
+
+        razorpayPaymentId:
+          payment?.razorpayPaymentId ||
+          null,
       },
 
       history: [
@@ -288,57 +378,49 @@ export const createOrder = async (req, res) => {
       ],
     });
 
-    /* ==========================
-       Telegram Alert
-    ========================== */
-
+    // Telegram Alert
     sendTelegramAlert(order);
 
-    /* ==========================
-       Send Confirmation Email
-    ========================== */
-
+    // Confirmation Email
     try {
-      const user = await User.findById(
-        order.customerId
-      );
-
       if (order.customerEmail) {
-  await sendEmail({
-    to: order.customerEmail,
+        await sendEmail({
+          to: order.customerEmail,
 
-    from:
-      process.env.ORDERS_MAIL_FROM ||
-      process.env.MAIL_FROM,
+          from:
+            process.env.ORDERS_MAIL_FROM ||
+            process.env.MAIL_FROM,
 
-    subject: `Your Zusko Order #${order.orderId} is Confirmed 🎉`,
+          subject: `Your Zusko Order #${order.orderId} is Confirmed 🎉`,
 
-    html: generateOrderPlacedEmail(
-      order.toObject()
-    ),
-  });
+          html: generateOrderPlacedEmail(
+            order.toObject()
+          ),
+        });
 
-  console.log(
-    `Order confirmation email sent to ${order.customerEmail}`
-  );
-}
+        console.log(
+          `Order confirmation email sent to ${order.customerEmail}`
+        );
+      }
     } catch (emailError) {
       console.error(
         "Order confirmation email failed:",
         emailError.message
       );
-
-      // Email fail hone par order rollback nahi hoga
     }
 
     res.status(201).json({
       success: true,
-      message: "Order created successfully",
+      message:
+        "Order created successfully",
       data: order,
     });
 
   } catch (err) {
-    console.error("ORDER ERROR:", err);
+    console.error(
+      "ORDER ERROR:",
+      err
+    );
 
     res.status(500).json({
       success: false,

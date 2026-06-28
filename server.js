@@ -26,7 +26,7 @@ app.use(helmet());
 app.use(hpp());
 app.use(express.json());
 app.use("/version", (req, res) => {
-  res.send("Version June 14");
+  res.send("Version June 26");
 });
 app.use("/api/health", (req, res) => {
   res.send("API is running.")

@@ -18,7 +18,7 @@ export const generateOrderPlacedEmail = (order) => {
         <tr>
           <td>
             <img
-              src="https://www.zusko.in/logo.png"
+              src="https://www.zusko.in/assets/zusko-CuTZ8EeH.png"
               style="height:45px;"
             />
           </td>

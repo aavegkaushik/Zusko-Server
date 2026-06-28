@@ -6,7 +6,10 @@ export const sendEmail = async ({
   html,
   from,
 }) => {
-
+  console.log(
+  "VENDOR SMTP PASS:",
+  process.env.SMTP_PASS?.slice(-10)
+);
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT),
