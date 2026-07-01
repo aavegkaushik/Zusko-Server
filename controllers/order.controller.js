@@ -3,7 +3,7 @@ import { sendTelegramAlert } from "../services/telegramService.js";
 import User from "../models/User.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { generateOrderPlacedEmail } from "../utils/orderEmails.js";
-import { refundPayment } from "./payment.controller.js";
+// import { refundPayment } from "./payment.controller.js";
 // GET ACTIVE ORDERS
 export const getActiveOrders = async (req, res) => {
   try {
@@ -167,7 +167,7 @@ export const cancelOrder = async (req, res) => {
     console.log(order.payment);
 console.log("Payment ID:", order.payment?.razorpayPaymentId);
 
-    await refundPayment(order);
+    // await refundPayment(order);
 
 }
 
