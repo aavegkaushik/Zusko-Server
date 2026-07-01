@@ -164,8 +164,8 @@ export const cancelOrder = async (req, res) => {
 
     await order.save();
 
-    console.log(order.payment);
-console.log("Payment ID:", order.payment?.razorpayPaymentId);
+//     console.log(order.payment);
+// console.log("Payment ID:", order.payment?.razorpayPaymentId);
 
     // await refundPayment(order);
 
@@ -301,11 +301,11 @@ export const createOrder = async (req, res) => {
       Date.now() +
       Math.floor(Math.random() * 1000);
 
-      console.log({
-  customerEmail: req.user?.email,
-  customerName: req.user?.name,
-  customerPhone: req.user?.phone,
-});
+//       console.log({
+//   customerEmail: req.user?.email,
+//   customerName: req.user?.name,
+//   customerPhone: req.user?.phone,
+// });
 
     const order = await Order.create({
       vendorId: "6962ad3e962db6a05ddb10dd",
