@@ -12,6 +12,7 @@ import securityRoutes from "./routes/securityRoutes.js";
 import { generalLimiter } from "./middleware/rateLimiter.js";
 import errorHandler from "./middleware/error.middleware.js";
 import careerRoutes from "./routes/career.routes.js";
+import businessLeadRoutes from "./routes/businessLead.routes.js";
 import helmet from "helmet";
 import hpp from "hpp";
 dotenv.config();
@@ -42,6 +43,10 @@ app.use("/api/addresses", addressRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/careers", careerRoutes);
 app.use("/api/security", securityRoutes);
+app.use(
+  "/api/business-leads",
+  businessLeadRoutes
+);
 app.use(errorHandler);
 mongoose
   .connect(process.env.MONGO_URI)
