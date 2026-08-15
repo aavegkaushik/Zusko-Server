@@ -1,6 +1,6 @@
 import Order from "../models/order.model.js";
 import { sendTelegramAlert } from "../services/telegramService.js";
-import User from "../models/User.model.js";
+import User from "../models/user.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { generateOrderPlacedEmail } from "../utils/orderEmails.js";
 import Coupon from "../models/coupon.model.js";
