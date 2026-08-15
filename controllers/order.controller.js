@@ -3,6 +3,8 @@ import { sendTelegramAlert } from "../services/telegramService.js";
 import User from "../models/User.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { generateOrderPlacedEmail } from "../utils/orderEmails.js";
+import Coupon from "../models/coupon.model.js";
+import CouponUsage from "../models/couponUsage.model.js";
 // import { refundPayment } from "./payment.controller.js";
 // GET ACTIVE ORDERS
 export const getActiveOrders = async (req, res) => {
@@ -267,13 +269,20 @@ export const createOrder = async (req, res) => {
       pickup,
       address,
       items,
-      total,
-      originalTotal,
-      discount = 0,
+      couponCode,
       deliveryFee = 0,
       handlingFee = 0,
       payment,
     } = req.body;
+
+    const userId = req.user?._id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
 
     if (!items || !items.length) {
       return res.status(400).json({
@@ -282,37 +291,267 @@ export const createOrder = async (req, res) => {
       });
     }
 
+    // -----------------------------------------
+    // FORMAT ITEMS
+    // -----------------------------------------
+
     const formattedItems = items.map((item) => ({
       name: item.name,
-      qty: item.qty,
-      price: item.price,
+      qty: Number(item.qty),
+      price: Number(item.price),
       service: item.service,
     }));
 
-    // const originalTotal = formattedItems.reduce(
-    //   (acc, item) => acc + item.qty * item.price,
-    //   0
-    // );
+    // -----------------------------------------
+    // CALCULATE ORIGINAL TOTAL ON SERVER
+    // -----------------------------------------
 
-    const finalAmount = total;
+    const originalTotal = formattedItems.reduce(
+      (acc, item) =>
+        acc + item.qty * item.price,
+      0
+    );
+
+    let discount = 0;
+    let appliedCoupon = null;
+
+    // -----------------------------------------
+    // COUPON VALIDATION
+    // -----------------------------------------
+
+    if (couponCode) {
+      const normalizedCode =
+        couponCode.trim().toUpperCase();
+
+      const coupon = await Coupon.findOne({
+        code: normalizedCode,
+        isActive: true,
+      });
+
+      if (!coupon) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid or inactive coupon",
+        });
+      }
+
+      const now = new Date();
+
+      // Valid from
+      if (
+        coupon.validFrom &&
+        now < coupon.validFrom
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Coupon is not active yet",
+        });
+      }
+
+      // Expiry
+      if (
+        coupon.validUntil &&
+        now > coupon.validUntil
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Coupon has expired",
+        });
+      }
+
+      // Global usage limit
+      if (
+        coupon.usageLimit !== null &&
+        coupon.usedCount >= coupon.usageLimit
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Coupon usage limit reached",
+        });
+      }
+
+      // Minimum order
+      if (
+        originalTotal <
+        coupon.minOrderValue
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: `Minimum order ₹${coupon.minOrderValue} required`,
+        });
+      }
+
+      // -----------------------------------------
+      // FIRST ORDER CHECK
+      // -----------------------------------------
+
+      if (
+        coupon.firstOrderOnly ||
+        coupon.newUsersOnly
+      ) {
+        const previousOrders =
+          await Order.countDocuments({
+            customerId: userId,
+            status: {
+              $ne: "cancelled",
+            },
+          });
+
+        if (previousOrders > 0) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "This coupon is only valid on your first order",
+          });
+        }
+      }
+
+      // -----------------------------------------
+      // USER-SPECIFIC COUPON
+      // -----------------------------------------
+
+      if (
+        coupon.applicableUsers &&
+        coupon.applicableUsers.length > 0
+      ) {
+        const allowed =
+          coupon.applicableUsers.some(
+            (id) =>
+              id.toString() ===
+              userId.toString()
+          );
+
+        if (!allowed) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "This coupon is not available for your account",
+          });
+        }
+      }
+
+      // -----------------------------------------
+      // SERVICE CHECK
+      // -----------------------------------------
+
+      if (
+        coupon.applicableServices &&
+        coupon.applicableServices.length > 0
+      ) {
+        const allServicesAllowed =
+          formattedItems.every((item) =>
+            coupon.applicableServices.includes(
+              item.service
+            )
+          );
+
+        if (!allServicesAllowed) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Coupon is not valid for selected services",
+          });
+        }
+      }
+
+      // -----------------------------------------
+      // CHECK USER USAGE
+      // -----------------------------------------
+
+      const usageCount =
+        await CouponUsage.countDocuments({
+          couponId: coupon._id,
+          userId,
+          status: "used",
+        });
+
+      if (
+        usageCount >= coupon.perUserLimit
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "You have already used this coupon",
+        });
+      }
+
+      // -----------------------------------------
+      // CALCULATE DISCOUNT
+      // -----------------------------------------
+
+      if (
+        coupon.discountType === "flat"
+      ) {
+        discount =
+          coupon.discountValue;
+      }
+
+      if (
+        coupon.discountType ===
+        "percentage"
+      ) {
+        discount =
+          (originalTotal *
+            coupon.discountValue) /
+          100;
+      }
+
+      // Maximum discount
+      if (
+        coupon.maxDiscount !== null &&
+        discount > coupon.maxDiscount
+      ) {
+        discount =
+          coupon.maxDiscount;
+      }
+
+      // Never discount more than subtotal
+      discount = Math.min(
+        discount,
+        originalTotal
+      );
+
+      discount = Math.round(
+        discount * 100
+      ) / 100;
+
+      appliedCoupon = coupon;
+    }
+
+    // -----------------------------------------
+    // FINAL TOTAL
+    // -----------------------------------------
+
+    const finalAmount = Math.max(
+      originalTotal +
+        Number(deliveryFee || 0) +
+        Number(handlingFee || 0) -
+        discount,
+      0
+    );
+
+    // -----------------------------------------
+    // ORDER ID
+    // -----------------------------------------
 
     const orderId =
       "ZSK" +
       Date.now() +
-      Math.floor(Math.random() * 1000);
+      Math.floor(
+        Math.random() * 1000
+      );
 
-//       console.log({
-//   customerEmail: req.user?.email,
-//   customerName: req.user?.name,
-//   customerPhone: req.user?.phone,
-// });
+    // -----------------------------------------
+    // CREATE ORDER
+    // -----------------------------------------
 
     const order = await Order.create({
-      vendorId: "6962ad3e962db6a05ddb10dd",
+      vendorId:
+        "6962ad3e962db6a05ddb10dd",
 
       orderId,
 
-      customerId: req.user?._id,
+      customerId: userId,
 
       customerName:
         customerName ||
@@ -324,7 +563,8 @@ export const createOrder = async (req, res) => {
         req.user?.phone ||
         "",
 
-      customerEmail: req.user?.email,
+      customerEmail:
+        req.user?.email,
 
       pickupContact:
         pickupContact || {
@@ -344,12 +584,19 @@ export const createOrder = async (req, res) => {
       items: formattedItems,
 
       total: finalAmount,
+
       originalTotal,
-      handlingFee,
+
+      handlingFee:
+        Number(handlingFee || 0),
+
       discount,
-      deliveryFee,
+
+      deliveryFee:
+        Number(deliveryFee || 0),
 
       address,
+
       pickup,
 
       payment: {
@@ -358,9 +605,7 @@ export const createOrder = async (req, res) => {
 
         status:
           payment?.status ||
-          (payment?.method === "COD"
-            ? "pending"
-            : "pending"),
+          "pending",
 
         amount: finalAmount,
 
@@ -369,19 +614,69 @@ export const createOrder = async (req, res) => {
           null,
       },
 
+      meta: {
+        couponCode:
+          appliedCoupon?.code || null,
+
+        couponId:
+          appliedCoupon?._id || null,
+      },
+
       history: [
         {
           status: "pending",
           changedAt: new Date(),
-          note: "Order created",
+          note: appliedCoupon
+            ? `Order created with coupon ${appliedCoupon.code}`
+            : "Order created",
         },
       ],
     });
 
-    // Telegram Alert
+    // -----------------------------------------
+    // RECORD COUPON USAGE
+    // -----------------------------------------
+
+    if (appliedCoupon) {
+      try {
+        await CouponUsage.create({
+          couponId: appliedCoupon._id,
+          userId,
+          orderId: order._id,
+          discountAmount: discount,
+          status: "used",
+        });
+
+        await Coupon.findByIdAndUpdate(
+          appliedCoupon._id,
+          {
+            $inc: {
+              usedCount: 1,
+            },
+          }
+        );
+      } catch (couponUsageError) {
+        console.error(
+          "COUPON USAGE ERROR:",
+          couponUsageError
+        );
+
+        // Important:
+        // If coupon usage failed, do not silently
+        // pretend that the coupon was consumed.
+      }
+    }
+
+    // -----------------------------------------
+    // TELEGRAM ALERT
+    // -----------------------------------------
+
     sendTelegramAlert(order);
 
-    // Confirmation Email
+    // -----------------------------------------
+    // CONFIRMATION EMAIL
+    // -----------------------------------------
+
     try {
       if (order.customerEmail) {
         await sendEmail({
@@ -391,11 +686,13 @@ export const createOrder = async (req, res) => {
             process.env.ORDERS_MAIL_FROM ||
             process.env.MAIL_FROM,
 
-          subject: `Your Zusko Order #${order.orderId} is Confirmed 🎉`,
+          subject:
+            `Your Zusko Order #${order.orderId} is Confirmed 🎉`,
 
-          html: generateOrderPlacedEmail(
-            order.toObject()
-          ),
+          html:
+            generateOrderPlacedEmail(
+              order.toObject()
+            ),
         });
 
         console.log(
@@ -409,20 +706,33 @@ export const createOrder = async (req, res) => {
       );
     }
 
-    res.status(201).json({
+    // -----------------------------------------
+    // RESPONSE
+    // -----------------------------------------
+
+    return res.status(201).json({
       success: true,
       message:
         "Order created successfully",
-      data: order,
-    });
 
+      data: order,
+
+      coupon: appliedCoupon
+        ? {
+            code:
+              appliedCoupon.code,
+
+            discount,
+          }
+        : null,
+    });
   } catch (err) {
     console.error(
       "ORDER ERROR:",
       err
     );
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: err.message,
     });

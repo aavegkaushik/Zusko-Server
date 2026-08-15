@@ -13,8 +13,11 @@ import { generalLimiter } from "./middleware/rateLimiter.js";
 import errorHandler from "./middleware/error.middleware.js";
 import careerRoutes from "./routes/career.routes.js";
 import businessLeadRoutes from "./routes/businessLead.routes.js";
+import couponRoutes from "./routes/coupon.routes.js";
 import helmet from "helmet";
 import hpp from "hpp";
+import { protect, verifyAdmin } from "./middleware/auth.middleware.js";
+import { createCoupon } from "./controllers/coupon.controller.js";
 dotenv.config();
 
 const app = express();
@@ -43,6 +46,13 @@ app.use("/api/addresses", addressRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/careers", careerRoutes);
 app.use("/api/security", securityRoutes);
+app.use("/api/coupons", couponRoutes);
+app.post(
+  "/",
+  protect,
+  verifyAdmin,
+  createCoupon
+);
 app.use(
   "/api/business-leads",
   businessLeadRoutes
