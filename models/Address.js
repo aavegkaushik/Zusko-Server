@@ -5,37 +5,110 @@ const addressSchema = new mongoose.Schema(
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true
+      required: true,
+      index: true,
     },
 
-    fullName: String,
-    phone: String,
+    fullName: {
+      type: String,
+      trim: true,
+    },
 
-    line1: String,
-    line2: String,
-    landmark: String,
+    phone: {
+      type: String,
+      trim: true,
+    },
 
-    city: String,
-    state: String,
-    pincode: String,
+    line1: {
+      type: String,
+      trim: true,
+    },
 
-    lat: Number,
-    lng: Number,
+    line2: {
+      type: String,
+      trim: true,
+    },
+
+    landmark: {
+      type: String,
+      trim: true,
+    },
+
+    city: {
+      type: String,
+      trim: true,
+    },
+
+    state: {
+      type: String,
+      trim: true,
+    },
+
+    pincode: {
+      type: String,
+      trim: true,
+    },
+
+    // GPS coordinates
+    lat: {
+      type: Number,
+      min: -90,
+      max: 90,
+    },
+
+    lng: {
+      type: Number,
+      min: -180,
+      max: 180,
+    },
+
+    googlePlaceId: {
+      type: String,
+      trim: true,
+    },
+
+    // GeoJSON
+    location: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+
+      coordinates: {
+        type: [Number],
+        validate: {
+          validator: function (value) {
+            return (
+              Array.isArray(value) &&
+              value.length === 2 &&
+              Number.isFinite(value[0]) &&
+              Number.isFinite(value[1])
+            );
+          },
+          message: "Invalid GeoJSON coordinates",
+        },
+      },
+    },
 
     label: {
       type: String,
       enum: ["Home", "Work", "Hostel", "PG", "Other"],
-      default: "Home"
+      default: "Home",
     },
 
     isDefault: {
       type: Boolean,
-      default: false
-    }
+      default: false,
+    },
   },
   {
-    timestamps: true
+    timestamps: true,
   }
 );
+
+addressSchema.index({
+  location: "2dsphere",
+});
 
 export default mongoose.model("Address", addressSchema);

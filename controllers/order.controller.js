@@ -5,6 +5,11 @@ import { sendEmail } from "../utils/sendEmail.js";
 import { generateOrderPlacedEmail } from "../utils/orderEmails.js";
 import Coupon from "../models/coupon.model.js";
 import CouponUsage from "../models/couponUsage.model.js";
+import Address from "../models/Address.js";
+import {
+  calculateDelivery,
+  MIN_ORDER_VALUE,
+} from "../services/deliveryService.js";
 // import { refundPayment } from "./payment.controller.js";
 // GET ACTIVE ORDERS
 export const getActiveOrders = async (req, res) => {
@@ -295,12 +300,18 @@ export const createOrder = async (req, res) => {
     // FORMAT ITEMS
     // -----------------------------------------
 
-    const formattedItems = items.map((item) => ({
-      name: item.name,
-      qty: Number(item.qty),
-      price: Number(item.price),
-      service: item.service,
-    }));
+const formattedItems = items.map((item) => ({
+  name: item.name,
+  qty: Number(item.qty),
+  price: Number(item.price),
+  service: item.service,
+
+  // Premium / Regular Care
+  careLevel:
+    item.careLevel === "premium"
+      ? "premium"
+      : "regular",
+}));
 
     // -----------------------------------------
     // CALCULATE ORIGINAL TOTAL ON SERVER
@@ -314,6 +325,76 @@ export const createOrder = async (req, res) => {
 
     let discount = 0;
     let appliedCoupon = null;
+
+    // ---------------------------------------------------------
+// MINIMUM ORDER VALUE
+// ---------------------------------------------------------
+
+// const MIN_ORDER_VALUE = 500;
+
+// if (originalTotal < MIN_ORDER_VALUE) {
+//   return res.status(400).json({
+//     success: false,
+//     code: "MIN_ORDER_VALUE",
+//     message:
+//       `Minimum order value is ₹${MIN_ORDER_VALUE}`,
+//   });
+// }
+
+// ---------------------------------------------------------
+// SERVER-SIDE DELIVERY CALCULATION
+// ---------------------------------------------------------
+
+const latitude =
+  address?.location?.latitude ??
+  address?.lat;
+
+const longitude =
+  address?.location?.longitude ??
+  address?.lng;
+
+if (
+  latitude === undefined ||
+  longitude === undefined
+) {
+  return res.status(400).json({
+    success: false,
+    code: "LOCATION_REQUIRED",
+    message:
+      "Please select a valid delivery location",
+  });
+}
+
+let deliveryCalculation;
+
+try {
+  deliveryCalculation =
+    await calculateDelivery({
+      latitude,
+      longitude,
+      orderValue: originalTotal,
+    });
+} catch (error) {
+  if (
+    error.code ===
+    "OUTSIDE_SERVICE_AREA"
+  ) {
+    return res.status(400).json({
+      success: false,
+      code: "OUTSIDE_SERVICE_AREA",
+      message:
+        "We are not serving in this area yet",
+    });
+  }
+
+  throw error;
+}
+
+const serverDeliveryFee =
+  deliveryCalculation.deliveryFee;
+
+const roadDistanceKm =
+  deliveryCalculation.distanceKm;
 
     // -----------------------------------------
     // COUPON VALIDATION
@@ -522,13 +603,11 @@ export const createOrder = async (req, res) => {
     // FINAL TOTAL
     // -----------------------------------------
 
-    const finalAmount = Math.max(
-      originalTotal +
-        Number(deliveryFee || 0) +
-        Number(handlingFee || 0) -
-        discount,
-      0
-    );
+const finalAmount =
+  originalTotal +
+  serverDeliveryFee +
+  Number(handlingFee || 0) -
+  Number(discount || 0);
 
     // -----------------------------------------
     // ORDER ID
@@ -593,9 +672,29 @@ export const createOrder = async (req, res) => {
       discount,
 
       deliveryFee:
-        Number(deliveryFee || 0),
+        Number(serverDeliveryFee || 0),
 
-      address,
+      address: {
+  fullAddress: address.fullAddress,
+  landmark: address.landmark,
+  city: address.city,
+  state: address.state,
+  pincode: address.pincode,
+
+  location: {
+    latitude:
+      deliveryCalculation.customerLocation.latitude,
+
+    longitude:
+      deliveryCalculation.customerLocation.longitude,
+  },
+
+  roadDistanceKm:
+    deliveryCalculation.distanceKm,
+
+  deliveryRatePerKm:
+    deliveryCalculation.ratePerKm,
+},
 
       pickup,
 
@@ -632,6 +731,180 @@ export const createOrder = async (req, res) => {
         },
       ],
     });
+
+    // ---------------------------------------------------------
+// AUTO-SAVE CUSTOMER ADDRESS
+// ---------------------------------------------------------
+
+try {
+  const existingAddress =
+    await Address.findOne({
+      userId: req.user._id,
+      lat: {
+        $gte:
+          deliveryCalculation.customerLocation.latitude -
+          0.00005,
+        $lte:
+          deliveryCalculation.customerLocation.latitude +
+          0.00005,
+      },
+      lng: {
+        $gte:
+          deliveryCalculation.customerLocation.longitude -
+          0.00005,
+        $lte:
+          deliveryCalculation.customerLocation.longitude +
+          0.00005,
+      },
+    });
+
+  if (existingAddress) {
+  existingAddress.fullName =
+    address.fullName ||
+    existingAddress.fullName;
+
+  existingAddress.phone =
+    address.phone ||
+    existingAddress.phone;
+
+  existingAddress.line1 =
+    address.line1 ||
+    address.fullAddress ||
+    existingAddress.line1;
+
+  existingAddress.line2 =
+    address.line2 ||
+    existingAddress.line2;
+
+  existingAddress.landmark =
+    address.landmark ||
+    existingAddress.landmark;
+
+  existingAddress.city =
+    address.city ||
+    existingAddress.city;
+
+  existingAddress.state =
+    address.state ||
+    existingAddress.state;
+
+  existingAddress.pincode =
+    address.pincode ||
+    existingAddress.pincode;
+
+
+  // -------------------------------------------------------
+  // UPDATE GPS COORDINATES
+  // -------------------------------------------------------
+
+  const updatedLatitude =
+    deliveryCalculation.customerLocation.latitude;
+
+  const updatedLongitude =
+    deliveryCalculation.customerLocation.longitude;
+
+  existingAddress.lat =
+    updatedLatitude;
+
+  existingAddress.lng =
+    updatedLongitude;
+
+
+  // -------------------------------------------------------
+  // UPDATE GEOJSON LOCATION
+  // -------------------------------------------------------
+
+  existingAddress.location = {
+    type: "Point",
+
+    coordinates: [
+      updatedLongitude,
+      updatedLatitude,
+    ],
+  };
+
+
+  await existingAddress.save();
+} else {
+
+    // New address becomes default
+    await Address.updateMany(
+      {
+        userId: req.user._id,
+      },
+      {
+        $set: {
+          isDefault: false,
+        },
+      }
+    );
+
+    await Address.create({
+      userId: req.user._id,
+
+      fullName:
+        address.fullName ||
+        req.user.name,
+
+      phone:
+        address.phone ||
+        req.user.phone,
+
+      line1:
+        address.line1 ||
+        address.fullAddress,
+
+      line2:
+        address.line2,
+
+      landmark:
+        address.landmark,
+
+      city:
+        address.city,
+
+      state:
+        address.state,
+
+      pincode:
+        address.pincode,
+
+      lat:
+        deliveryCalculation
+          .customerLocation
+          .latitude,
+
+      lng:
+        deliveryCalculation
+          .customerLocation
+          .longitude,
+
+      location: {
+        type: "Point",
+        coordinates: [
+          deliveryCalculation
+            .customerLocation
+            .longitude,
+
+          deliveryCalculation
+            .customerLocation
+            .latitude,
+        ],
+      },
+
+      label: address.label || "Home",
+
+      isDefault: true,
+    });
+  }
+
+} catch (addressError) {
+  // Address saving should NOT cancel a valid paid/order request.
+  console.error(
+    "AUTO SAVE ADDRESS ERROR:",
+    addressError
+  );
+}
 
     // -----------------------------------------
     // RECORD COUPON USAGE
@@ -683,7 +956,7 @@ export const createOrder = async (req, res) => {
           to: order.customerEmail,
 
           from:
-            process.env.ORDERS_MAIL_FROM ||
+            process.env.ORDER_MAIL ||
             process.env.MAIL_FROM,
 
           subject:
@@ -746,3 +1019,78 @@ export const createOrder = async (req, res) => {
 
 //   res.json(orders);
 // };
+
+
+export const getDeliveryEstimate = async (req, res) => {
+  try {
+    const {
+      latitude,
+      longitude,
+      orderValue,
+    } = req.body;
+
+    if (
+      latitude === undefined ||
+      longitude === undefined
+    ) {
+      return res.status(400).json({
+        success: false,
+        code: "LOCATION_REQUIRED",
+        message:
+          "Your exact location is required",
+      });
+    }
+
+    const numericOrderValue =
+      Number(orderValue);
+
+    if (
+      !Number.isFinite(numericOrderValue) ||
+      numericOrderValue < 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_ORDER_VALUE",
+        message:
+          "Invalid order value",
+      });
+    }
+
+    const delivery =
+      await calculateDelivery({
+        latitude,
+        longitude,
+        orderValue: numericOrderValue,
+      });
+
+    return res.status(200).json({
+      success: true,
+      data: delivery,
+    });
+
+  } catch (error) {
+    console.error(
+      "DELIVERY ESTIMATE ERROR:",
+      error
+    );
+
+    if (
+      error.code ===
+      "OUTSIDE_SERVICE_AREA"
+    ) {
+      return res.status(400).json({
+        success: false,
+        code: "OUTSIDE_SERVICE_AREA",
+        message:
+          "We are not serving in this area yet",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message ||
+        "Unable to calculate delivery charge",
+    });
+  }
+};

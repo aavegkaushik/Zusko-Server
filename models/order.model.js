@@ -5,9 +5,30 @@ const { Schema } = mongoose;
 const ItemSchema = new Schema(
   {
     name: { type: String, required: true },
-    qty: { type: Number, required: true, min: 1 },
-    price: { type: Number, required: true, min: 0 },
-    service: { type: String, required: true },
+
+    qty: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+
+    price: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    service: {
+      type: String,
+      required: true,
+    },
+
+    // Premium / Regular Care
+    careLevel: {
+      type: String,
+      enum: ["regular", "premium"],
+      default: "regular",
+    },
   },
   { _id: false },
 );
@@ -79,11 +100,27 @@ const OrderSchema = new Schema(
     },
 
     address: {
-      fullAddress: String,
-      landmark: String,
-      city: String,
-      pincode: String,
-    },
+  fullAddress: String,
+  landmark: String,
+  city: String,
+  state: String,
+  pincode: String,
+
+  location: {
+    latitude: Number,
+    longitude: Number,
+  },
+
+  roadDistanceKm: {
+    type: Number,
+    min: 0,
+  },
+
+  deliveryRatePerKm: {
+    type: Number,
+    default: 10,
+  },
+},
 
     items: { type: [ItemSchema], default: [] },
 
