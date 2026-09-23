@@ -16,6 +16,7 @@ import businessLeadRoutes from "./routes/businessLead.routes.js";
 import couponRoutes from "./routes/coupon.routes.js";
 import helmet from "helmet";
 import hpp from "hpp";
+import pricingRoutes from "./routes/pricing.routes.js";
 import { protect, verifyAdmin } from "./middleware/auth.middleware.js";
 import { createCoupon } from "./controllers/coupon.controller.js";
 dotenv.config();
@@ -47,6 +48,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/careers", careerRoutes);
 app.use("/api/security", securityRoutes);
 app.use("/api/coupons", couponRoutes);
+app.use("/api/pricing", pricingRoutes);
 app.post(
   "/",
   protect,
