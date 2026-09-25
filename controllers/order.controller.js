@@ -1,68 +1,85 @@
 import Order from "../models/order.model.js";
 import { sendTelegramAlert } from "../services/telegramService.js";
-import User from "../models/user.model.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { generateOrderPlacedEmail } from "../utils/orderEmails.js";
 import Coupon from "../models/coupon.model.js";
 import CouponUsage from "../models/couponUsage.model.js";
+import { checkEligibility } from "./coupon.controller.js";
 import Address from "../models/Address.js";
-import {
-  calculateDelivery,
-  MIN_ORDER_VALUE,
-} from "../services/deliveryService.js";
+import { calculateDelivery } from "../services/deliveryService.js";
+
 // import { refundPayment } from "./payment.controller.js";
+
+
+// =========================================================
 // GET ACTIVE ORDERS
+// =========================================================
 export const getActiveOrders = async (req, res) => {
   try {
     const orders = await Order.find({
-      $or: [{ customerId: req.user._id }, { customerPhone: req.user.phone }],
+      $or: [
+        { customerId: req.user._id },
+        { customerPhone: req.user.phone },
+      ],
       status: {
         $nin: ["completed", "cancelled"],
       },
     }).sort({ createdAt: -1 });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: orders.length,
       data: orders,
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
 
+
+// =========================================================
 // GET ORDER HISTORY
+// =========================================================
 export const getOrderHistory = async (req, res) => {
   try {
     const orders = await Order.find({
-      $or: [{ customerId: req.user._id }, { customerPhone: req.user.phone }],
+      $or: [
+        { customerId: req.user._id },
+        { customerPhone: req.user.phone },
+      ],
       status: {
         $in: ["completed", "cancelled"],
       },
     }).sort({ createdAt: -1 });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: orders.length,
       data: orders,
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
 
+
+// =========================================================
 // GET SINGLE ORDER TRACKING
+// =========================================================
 export const getOrderTracking = async (req, res) => {
   try {
     const order = await Order.findOne({
       _id: req.params.id,
-      $or: [{ customerId: req.user._id }, { customerPhone: req.user.phone }],
+      $or: [
+        { customerId: req.user._id },
+        { customerPhone: req.user.phone },
+      ],
     });
 
     if (!order) {
@@ -72,59 +89,63 @@ export const getOrderTracking = async (req, res) => {
       });
     }
 
-    res.status(200).json({
-  success: true,
-  data: {
-    _id: order._id,
-    orderId: order.orderId,
+    return res.status(200).json({
+      success: true,
+      data: {
+        _id: order._id,
+        orderId: order.orderId,
 
-    customerName: order.customerName,
-    customerPhone: order.customerPhone,
-    customerEmail: order.customerEmail,
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+        customerEmail: order.customerEmail,
 
-    status: order.status,
+        status: order.status,
 
-    pickup: order.pickup,
-    pickupContact: order.pickupContact,
+        pickup: order.pickup,
+        pickupContact: order.pickupContact,
 
-    address: order.address,
+        address: order.address,
 
-    items: order.items,
+        items: order.items,
 
-    originalTotal: order.originalTotal || 0,
-    handlingFee: order.handlingFee || 0,
-    deliveryFee: order.deliveryFee || 0,
-    discount: order.discount || 0,
+        originalTotal: order.originalTotal || 0,
+        handlingFee: order.handlingFee || 0,
+        deliveryFee: order.deliveryFee || 0,
+        discount: order.discount || 0,
 
-    total: order.total,
+        total: order.total,
 
-    payment: order.payment,
+        payment: order.payment,
 
-    history: order.history,
+        history: order.history,
 
-    estimatedDelivery:
-      order.estimatedDelivery || null,
+        estimatedDelivery: order.estimatedDelivery || null,
 
-    deliveryAgent:
-      order.deliveryAgent || null,
+        deliveryAgent: order.deliveryAgent || null,
 
-    createdAt: order.createdAt,
-  },
-});
+        createdAt: order.createdAt,
+      },
+    });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
 
+
+// =========================================================
 // CANCEL ORDER
+// =========================================================
 export const cancelOrder = async (req, res) => {
   try {
     const order = await Order.findOne({
       _id: req.params.id,
-      $or: [{ customerId: req.user._id }, { customerPhone: req.user.phone }],
+      $or: [
+        { customerId: req.user._id },
+        { customerPhone: req.user.phone },
+      ],
     });
 
     if (!order) {
@@ -134,7 +155,7 @@ export const cancelOrder = async (req, res) => {
       });
     }
 
-    // allowed only before processing starts
+    // Order cannot be cancelled after processing starts
     if (
       [
         "in-progress",
@@ -151,6 +172,10 @@ export const cancelOrder = async (req, res) => {
 
     order.status = "cancelled";
 
+    if (!Array.isArray(order.history)) {
+      order.history = [];
+    }
+
     order.history.push({
       status: "cancelled",
       changedAt: new Date(),
@@ -159,39 +184,37 @@ export const cancelOrder = async (req, res) => {
 
     await order.save();
 
-    if (
-    order.payment?.status === "paid"
-) {
-
-    order.refund = {
+    // Refund handling
+    if (order.payment?.status === "paid") {
+      order.refund = {
         status: "processing",
         amount: order.payment.amount,
         initiatedAt: new Date(),
-    };
+      };
 
-    await order.save();
+      await order.save();
 
-//     console.log(order.payment);
-// console.log("Payment ID:", order.payment?.razorpayPaymentId);
+      // Uncomment when refundPayment is ready
+      // await refundPayment(order);
+    }
 
-    // await refundPayment(order);
-
-}
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Order cancelled successfully",
       data: order,
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
 
+
+// =========================================================
 // RATE ORDER
+// =========================================================
 export const rateOrder = async (req, res) => {
   try {
     const { stars, review } = req.body;
@@ -225,7 +248,13 @@ export const rateOrder = async (req, res) => {
       });
     }
 
-    if (!stars || stars < 1 || stars > 5) {
+    const numericStars = Number(stars);
+
+    if (
+      !Number.isFinite(numericStars) ||
+      numericStars < 1 ||
+      numericStars > 5
+    ) {
       return res.status(400).json({
         success: false,
         message: "Rating must be between 1 and 5",
@@ -233,7 +262,7 @@ export const rateOrder = async (req, res) => {
     }
 
     const rating = {
-      stars,
+      stars: numericStars,
       review: review || "",
       ratedAt: new Date(),
     };
@@ -256,7 +285,6 @@ export const rateOrder = async (req, res) => {
       message: "Rating submitted successfully",
       data: rating,
     });
-
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -265,6 +293,10 @@ export const rateOrder = async (req, res) => {
   }
 };
 
+
+// =========================================================
+// CREATE ORDER
+// =========================================================
 export const createOrder = async (req, res) => {
   try {
     const {
@@ -274,14 +306,15 @@ export const createOrder = async (req, res) => {
       pickup,
       address,
       items,
-      couponCode,
-      deliveryFee = 0,
-      handlingFee = 0,
       payment,
+      couponCode,
     } = req.body;
 
     const userId = req.user?._id;
 
+    // -------------------------------------------------------
+    // AUTHENTICATION
+    // -------------------------------------------------------
     if (!userId) {
       return res.status(401).json({
         success: false,
@@ -289,330 +322,240 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    if (!items || !items.length) {
+    // -------------------------------------------------------
+    // ITEMS VALIDATION
+    // -------------------------------------------------------
+    if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         success: false,
         message: "No items in order",
       });
     }
 
-    // -----------------------------------------
+    // -------------------------------------------------------
+    // ADDRESS VALIDATION
+    // -------------------------------------------------------
+    if (!address || typeof address !== "object") {
+      return res.status(400).json({
+        success: false,
+        code: "ADDRESS_REQUIRED",
+        message: "Delivery address is required",
+      });
+    }
+
+    // =======================================================
     // FORMAT ITEMS
-    // -----------------------------------------
+    // =======================================================
+    const formattedItems = items.map((item) => ({
+      name: String(item?.name || "").trim(),
 
-const formattedItems = items.map((item) => ({
-  name: item.name,
-  qty: Number(item.qty),
-  price: Number(item.price),
-  service: item.service,
+      qty: Number(item?.qty || 0),
 
-  // Premium / Regular Care
-  careLevel:
-    item.careLevel === "premium"
-      ? "premium"
-      : "regular",
-}));
+      price: Number(item?.price || 0),
 
-    // -----------------------------------------
-    // CALCULATE ORIGINAL TOTAL ON SERVER
-    // -----------------------------------------
+      service: String(item?.service || "").trim(),
 
-    const originalTotal = formattedItems.reduce(
-      (acc, item) =>
-        acc + item.qty * item.price,
-      0
+      careLevel:
+        item?.careLevel === "premium"
+          ? "premium"
+          : "regular",
+    }));
+
+    // -------------------------------------------------------
+    // INVALID ITEM CHECK
+    // -------------------------------------------------------
+    const invalidItem = formattedItems.find(
+      (item) =>
+        !item.name ||
+        !item.service ||
+        !Number.isFinite(item.qty) ||
+        item.qty <= 0 ||
+        !Number.isFinite(item.price) ||
+        item.price < 0
     );
 
+    if (invalidItem) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item details",
+      });
+    }
+
+    // =======================================================
+    // SERVER-SIDE SUBTOTAL
+    // NEVER TRUST FRONTEND TOTAL
+    // =======================================================
+    const originalTotal =
+      Math.round(
+        formattedItems.reduce(
+          (sum, item) =>
+            sum + item.qty * item.price,
+          0
+        ) * 100
+      ) / 100;
+
+    if (
+      !Number.isFinite(originalTotal) ||
+      originalTotal <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order amount",
+      });
+    }
+
+    // =======================================================
+    // GET CUSTOMER LOCATION
+    // =======================================================
+    const latitude =
+      address?.location?.latitude ??
+      address?.lat;
+
+    const longitude =
+      address?.location?.longitude ??
+      address?.lng;
+
+    if (
+      latitude === undefined ||
+      latitude === null ||
+      longitude === undefined ||
+      longitude === null ||
+      !Number.isFinite(Number(latitude)) ||
+      !Number.isFinite(Number(longitude))
+    ) {
+      return res.status(400).json({
+        success: false,
+        code: "LOCATION_REQUIRED",
+        message:
+          "Please select a valid delivery location",
+      });
+    }
+
+    // =======================================================
+    // SERVER-SIDE DELIVERY CALCULATION
+    // =======================================================
+    let deliveryCalculation;
+
+    try {
+      deliveryCalculation =
+        await calculateDelivery({
+          latitude: Number(latitude),
+          longitude: Number(longitude),
+          orderValue: originalTotal,
+        });
+    } catch (error) {
+      if (
+        error.code ===
+        "OUTSIDE_SERVICE_AREA"
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: "OUTSIDE_SERVICE_AREA",
+          message:
+            "We are not serving in this area yet",
+        });
+      }
+
+      throw error;
+    }
+
+    const serverDeliveryFee =
+      Number(
+        deliveryCalculation?.deliveryFee || 0
+      );
+
+    const roadDistanceKm =
+      Number(
+        deliveryCalculation?.distanceKm || 0
+      );
+
+    const deliveryRatePerKm =
+      Number(
+        deliveryCalculation?.ratePerKm || 0
+      );
+
+    // =======================================================
+    // HANDLING FEE
+    // =======================================================
+    const handlingFee =
+      originalTotal > 0 ? 15 : 0;
+
+    // =======================================================
+    // COUPON VALIDATION
+    // =======================================================
     let discount = 0;
     let appliedCoupon = null;
 
-    // ---------------------------------------------------------
-// MINIMUM ORDER VALUE
-// ---------------------------------------------------------
-
-// const MIN_ORDER_VALUE = 500;
-
-// if (originalTotal < MIN_ORDER_VALUE) {
-//   return res.status(400).json({
-//     success: false,
-//     code: "MIN_ORDER_VALUE",
-//     message:
-//       `Minimum order value is ₹${MIN_ORDER_VALUE}`,
-//   });
-// }
-
-// ---------------------------------------------------------
-// SERVER-SIDE DELIVERY CALCULATION
-// ---------------------------------------------------------
-
-const latitude =
-  address?.location?.latitude ??
-  address?.lat;
-
-const longitude =
-  address?.location?.longitude ??
-  address?.lng;
-
-if (
-  latitude === undefined ||
-  longitude === undefined
-) {
-  return res.status(400).json({
-    success: false,
-    code: "LOCATION_REQUIRED",
-    message:
-      "Please select a valid delivery location",
-  });
-}
-
-let deliveryCalculation;
-
-try {
-  deliveryCalculation =
-    await calculateDelivery({
-      latitude,
-      longitude,
-      orderValue: originalTotal,
-    });
-} catch (error) {
-  if (
-    error.code ===
-    "OUTSIDE_SERVICE_AREA"
-  ) {
-    return res.status(400).json({
-      success: false,
-      code: "OUTSIDE_SERVICE_AREA",
-      message:
-        "We are not serving in this area yet",
-    });
-  }
-
-  throw error;
-}
-
-const serverDeliveryFee =
-  deliveryCalculation.deliveryFee;
-
-const roadDistanceKm =
-  deliveryCalculation.distanceKm;
-
-    // -----------------------------------------
-    // COUPON VALIDATION
-    // -----------------------------------------
-
-    if (couponCode) {
+    if (
+      couponCode &&
+      String(couponCode).trim()
+    ) {
       const normalizedCode =
-        couponCode.trim().toUpperCase();
+        String(couponCode)
+          .trim()
+          .toUpperCase();
 
-      const coupon = await Coupon.findOne({
-        code: normalizedCode,
-        isActive: true,
-      });
+      const coupon =
+        await Coupon.findOne({
+          code: normalizedCode,
+          isActive: true,
+        });
 
       if (!coupon) {
         return res.status(400).json({
           success: false,
-          message: "Invalid or inactive coupon",
+          message:
+            "Invalid or inactive coupon",
         });
       }
 
-      const now = new Date();
+      // Use centralized coupon eligibility logic
+      const eligibility =
+        await checkEligibility(
+          coupon,
+          req.user,
+          originalTotal,
+          formattedItems
+        );
 
-      // Valid from
-      if (
-        coupon.validFrom &&
-        now < coupon.validFrom
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Coupon is not active yet",
-        });
-      }
-
-      // Expiry
-      if (
-        coupon.validUntil &&
-        now > coupon.validUntil
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Coupon has expired",
-        });
-      }
-
-      // Global usage limit
-      if (
-        coupon.usageLimit !== null &&
-        coupon.usedCount >= coupon.usageLimit
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Coupon usage limit reached",
-        });
-      }
-
-      // Minimum order
-      if (
-        originalTotal <
-        coupon.minOrderValue
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: `Minimum order ₹${coupon.minOrderValue} required`,
-        });
-      }
-
-      // -----------------------------------------
-      // FIRST ORDER CHECK
-      // -----------------------------------------
-
-      if (
-        coupon.firstOrderOnly ||
-        coupon.newUsersOnly
-      ) {
-        const previousOrders =
-          await Order.countDocuments({
-            customerId: userId,
-            status: {
-              $ne: "cancelled",
-            },
-          });
-
-        if (previousOrders > 0) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "This coupon is only valid on your first order",
-          });
-        }
-      }
-
-      // -----------------------------------------
-      // USER-SPECIFIC COUPON
-      // -----------------------------------------
-
-      if (
-        coupon.applicableUsers &&
-        coupon.applicableUsers.length > 0
-      ) {
-        const allowed =
-          coupon.applicableUsers.some(
-            (id) =>
-              id.toString() ===
-              userId.toString()
-          );
-
-        if (!allowed) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "This coupon is not available for your account",
-          });
-        }
-      }
-
-      // -----------------------------------------
-      // SERVICE CHECK
-      // -----------------------------------------
-
-      if (
-        coupon.applicableServices &&
-        coupon.applicableServices.length > 0
-      ) {
-        const allServicesAllowed =
-          formattedItems.every((item) =>
-            coupon.applicableServices.includes(
-              item.service
-            )
-          );
-
-        if (!allServicesAllowed) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Coupon is not valid for selected services",
-          });
-        }
-      }
-
-      // -----------------------------------------
-      // CHECK USER USAGE
-      // -----------------------------------------
-
-      const usageCount =
-        await CouponUsage.countDocuments({
-          couponId: coupon._id,
-          userId,
-          status: "used",
-        });
-
-      if (
-        usageCount >= coupon.perUserLimit
-      ) {
+      if (!eligibility.eligible) {
         return res.status(400).json({
           success: false,
           message:
-            "You have already used this coupon",
+            eligibility.message ||
+            "Coupon is not valid",
         });
       }
 
-      // -----------------------------------------
-      // CALCULATE DISCOUNT
-      // -----------------------------------------
-
-      if (
-        coupon.discountType === "flat"
-      ) {
-        discount =
-          coupon.discountValue;
-      }
-
-      if (
-        coupon.discountType ===
-        "percentage"
-      ) {
-        discount =
-          (originalTotal *
-            coupon.discountValue) /
-          100;
-      }
-
-      // Maximum discount
-      if (
-        coupon.maxDiscount !== null &&
-        discount > coupon.maxDiscount
-      ) {
-        discount =
-          coupon.maxDiscount;
-      }
-
-      // Never discount more than subtotal
-      discount = Math.min(
-        discount,
-        originalTotal
-      );
-
-      discount = Math.round(
-        discount * 100
-      ) / 100;
+      discount =
+        Math.round(
+          Number(
+            eligibility.discount || 0
+          ) * 100
+        ) / 100;
 
       appliedCoupon = coupon;
     }
 
-    // -----------------------------------------
+    // =======================================================
     // FINAL TOTAL
-    // -----------------------------------------
+    // =======================================================
+    const finalAmount =
+      Math.max(
+        Math.round(
+          (
+            originalTotal +
+            serverDeliveryFee +
+            handlingFee -
+            discount
+          ) * 100
+        ) / 100,
+        0
+      );
 
-const finalAmount =
-  originalTotal +
-  serverDeliveryFee +
-  Number(handlingFee || 0) -
-  Number(discount || 0);
-
-    // -----------------------------------------
+    // =======================================================
     // ORDER ID
-    // -----------------------------------------
-
+    // =======================================================
     const orderId =
       "ZSK" +
       Date.now() +
@@ -620,303 +563,333 @@ const finalAmount =
         Math.random() * 1000
       );
 
-    // -----------------------------------------
+    // =======================================================
     // CREATE ORDER
-    // -----------------------------------------
+    // =======================================================
+    const order =
+      await Order.create({
+        vendorId:
+          "6962ad3e962db6a05ddb10dd",
 
-    const order = await Order.create({
-      vendorId:
-        "6962ad3e962db6a05ddb10dd",
+        orderId,
 
-      orderId,
+        customerId: userId,
 
-      customerId: userId,
+        customerName:
+          customerName ||
+          req.user?.name ||
+          "Guest",
 
-      customerName:
-        customerName ||
-        req.user?.name ||
-        "Guest",
+        customerPhone:
+          customerPhone ||
+          req.user?.phone ||
+          "",
 
-      customerPhone:
-        customerPhone ||
-        req.user?.phone ||
-        "",
+        customerEmail:
+          req.user?.email,
 
-      customerEmail:
-        req.user?.email,
+        pickupContact:
+          pickupContact || {
+            name:
+              customerName ||
+              req.user?.name ||
+              "",
 
-      pickupContact:
-        pickupContact || {
-          name:
-            customerName ||
-            req.user?.name ||
-            "",
+            phone:
+              customerPhone ||
+              req.user?.phone ||
+              "",
+
+            isAlternate: false,
+          },
+
+        items: formattedItems,
+
+        total: finalAmount,
+
+        originalTotal,
+
+        handlingFee,
+
+        discount,
+
+        deliveryFee:
+          serverDeliveryFee,
+
+        address: {
+          fullAddress:
+            address.fullAddress,
+
+          landmark:
+            address.landmark,
+
+          city:
+            address.city,
+
+          state:
+            address.state,
+
+          pincode:
+            address.pincode,
+
+          location: {
+            latitude:
+              Number(
+                deliveryCalculation
+                  .customerLocation
+                  .latitude
+              ),
+
+            longitude:
+              Number(
+                deliveryCalculation
+                  .customerLocation
+                  .longitude
+              ),
+          },
+
+          roadDistanceKm,
+
+          deliveryRatePerKm,
+        },
+
+        pickup,
+
+        payment: {
+          method:
+            payment?.method ||
+            "COD",
+
+          status:
+            payment?.status ||
+            "pending",
+
+          amount:
+            finalAmount,
+
+          razorpayPaymentId:
+            payment?.razorpayPaymentId ||
+            null,
+        },
+
+        meta: {
+          couponCode:
+            appliedCoupon?.code ||
+            null,
+
+          couponId:
+            appliedCoupon?._id ||
+            null,
+        },
+
+        history: [
+          {
+            status: "pending",
+
+            changedAt:
+              new Date(),
+
+            note: appliedCoupon
+              ? `Order created with coupon ${appliedCoupon.code}`
+              : "Order created",
+          },
+        ],
+      });
+
+    // =======================================================
+    // AUTO SAVE CUSTOMER ADDRESS
+    // =======================================================
+    try {
+      const customerLatitude =
+        Number(
+          deliveryCalculation
+            .customerLocation
+            .latitude
+        );
+
+      const customerLongitude =
+        Number(
+          deliveryCalculation
+            .customerLocation
+            .longitude
+        );
+
+      const existingAddress =
+        await Address.findOne({
+          userId:
+            req.user._id,
+
+          lat: {
+            $gte:
+              customerLatitude -
+              0.00005,
+
+            $lte:
+              customerLatitude +
+              0.00005,
+          },
+
+          lng: {
+            $gte:
+              customerLongitude -
+              0.00005,
+
+            $lte:
+              customerLongitude +
+              0.00005,
+          },
+        });
+
+      // -----------------------------------------------------
+      // UPDATE EXISTING ADDRESS
+      // -----------------------------------------------------
+      if (existingAddress) {
+        existingAddress.fullName =
+          address.fullName ||
+          existingAddress.fullName;
+
+        existingAddress.phone =
+          address.phone ||
+          existingAddress.phone;
+
+        existingAddress.line1 =
+          address.line1 ||
+          address.fullAddress ||
+          existingAddress.line1;
+
+        existingAddress.line2 =
+          address.line2 ||
+          existingAddress.line2;
+
+        existingAddress.landmark =
+          address.landmark ||
+          existingAddress.landmark;
+
+        existingAddress.city =
+          address.city ||
+          existingAddress.city;
+
+        existingAddress.state =
+          address.state ||
+          existingAddress.state;
+
+        existingAddress.pincode =
+          address.pincode ||
+          existingAddress.pincode;
+
+        existingAddress.lat =
+          customerLatitude;
+
+        existingAddress.lng =
+          customerLongitude;
+
+        existingAddress.location = {
+          type: "Point",
+
+          coordinates: [
+            customerLongitude,
+            customerLatitude,
+          ],
+        };
+
+        await existingAddress.save();
+      }
+
+      // -----------------------------------------------------
+      // CREATE NEW ADDRESS
+      // -----------------------------------------------------
+      else {
+        await Address.updateMany(
+          {
+            userId:
+              req.user._id,
+          },
+          {
+            $set: {
+              isDefault: false,
+            },
+          }
+        );
+
+        await Address.create({
+          userId:
+            req.user._id,
+
+          fullName:
+            address.fullName ||
+            req.user.name,
 
           phone:
-            customerPhone ||
-            req.user?.phone ||
-            "",
+            address.phone ||
+            req.user.phone,
 
-          isAlternate: false,
-        },
+          line1:
+            address.line1 ||
+            address.fullAddress,
 
-      items: formattedItems,
+          line2:
+            address.line2,
 
-      total: finalAmount,
+          landmark:
+            address.landmark,
 
-      originalTotal,
+          city:
+            address.city,
 
-      handlingFee:
-        Number(handlingFee || 0),
+          state:
+            address.state,
 
-      discount,
+          pincode:
+            address.pincode,
 
-      deliveryFee:
-        Number(serverDeliveryFee || 0),
+          lat:
+            customerLatitude,
 
-      address: {
-  fullAddress: address.fullAddress,
-  landmark: address.landmark,
-  city: address.city,
-  state: address.state,
-  pincode: address.pincode,
+          lng:
+            customerLongitude,
 
-  location: {
-    latitude:
-      deliveryCalculation.customerLocation.latitude,
+          location: {
+            type: "Point",
 
-    longitude:
-      deliveryCalculation.customerLocation.longitude,
-  },
+            coordinates: [
+              customerLongitude,
+              customerLatitude,
+            ],
+          },
 
-  roadDistanceKm:
-    deliveryCalculation.distanceKm,
+          label:
+            address.label ||
+            "Home",
 
-  deliveryRatePerKm:
-    deliveryCalculation.ratePerKm,
-},
-
-      pickup,
-
-      payment: {
-        method:
-          payment?.method || "COD",
-
-        status:
-          payment?.status ||
-          "pending",
-
-        amount: finalAmount,
-
-        razorpayPaymentId:
-          payment?.razorpayPaymentId ||
-          null,
-      },
-
-      meta: {
-        couponCode:
-          appliedCoupon?.code || null,
-
-        couponId:
-          appliedCoupon?._id || null,
-      },
-
-      history: [
-        {
-          status: "pending",
-          changedAt: new Date(),
-          note: appliedCoupon
-            ? `Order created with coupon ${appliedCoupon.code}`
-            : "Order created",
-        },
-      ],
-    });
-
-    // ---------------------------------------------------------
-// AUTO-SAVE CUSTOMER ADDRESS
-// ---------------------------------------------------------
-
-try {
-  const existingAddress =
-    await Address.findOne({
-      userId: req.user._id,
-      lat: {
-        $gte:
-          deliveryCalculation.customerLocation.latitude -
-          0.00005,
-        $lte:
-          deliveryCalculation.customerLocation.latitude +
-          0.00005,
-      },
-      lng: {
-        $gte:
-          deliveryCalculation.customerLocation.longitude -
-          0.00005,
-        $lte:
-          deliveryCalculation.customerLocation.longitude +
-          0.00005,
-      },
-    });
-
-  if (existingAddress) {
-  existingAddress.fullName =
-    address.fullName ||
-    existingAddress.fullName;
-
-  existingAddress.phone =
-    address.phone ||
-    existingAddress.phone;
-
-  existingAddress.line1 =
-    address.line1 ||
-    address.fullAddress ||
-    existingAddress.line1;
-
-  existingAddress.line2 =
-    address.line2 ||
-    existingAddress.line2;
-
-  existingAddress.landmark =
-    address.landmark ||
-    existingAddress.landmark;
-
-  existingAddress.city =
-    address.city ||
-    existingAddress.city;
-
-  existingAddress.state =
-    address.state ||
-    existingAddress.state;
-
-  existingAddress.pincode =
-    address.pincode ||
-    existingAddress.pincode;
-
-
-  // -------------------------------------------------------
-  // UPDATE GPS COORDINATES
-  // -------------------------------------------------------
-
-  const updatedLatitude =
-    deliveryCalculation.customerLocation.latitude;
-
-  const updatedLongitude =
-    deliveryCalculation.customerLocation.longitude;
-
-  existingAddress.lat =
-    updatedLatitude;
-
-  existingAddress.lng =
-    updatedLongitude;
-
-
-  // -------------------------------------------------------
-  // UPDATE GEOJSON LOCATION
-  // -------------------------------------------------------
-
-  existingAddress.location = {
-    type: "Point",
-
-    coordinates: [
-      updatedLongitude,
-      updatedLatitude,
-    ],
-  };
-
-
-  await existingAddress.save();
-} else {
-
-    // New address becomes default
-    await Address.updateMany(
-      {
-        userId: req.user._id,
-      },
-      {
-        $set: {
-          isDefault: false,
-        },
+          isDefault: true,
+        });
       }
-    );
+    } catch (addressError) {
+      // Address save failure must not
+      // cancel a valid order.
+      console.error(
+        "AUTO SAVE ADDRESS ERROR:",
+        addressError.message
+      );
+    }
 
-    await Address.create({
-      userId: req.user._id,
-
-      fullName:
-        address.fullName ||
-        req.user.name,
-
-      phone:
-        address.phone ||
-        req.user.phone,
-
-      line1:
-        address.line1 ||
-        address.fullAddress,
-
-      line2:
-        address.line2,
-
-      landmark:
-        address.landmark,
-
-      city:
-        address.city,
-
-      state:
-        address.state,
-
-      pincode:
-        address.pincode,
-
-      lat:
-        deliveryCalculation
-          .customerLocation
-          .latitude,
-
-      lng:
-        deliveryCalculation
-          .customerLocation
-          .longitude,
-
-      location: {
-        type: "Point",
-        coordinates: [
-          deliveryCalculation
-            .customerLocation
-            .longitude,
-
-          deliveryCalculation
-            .customerLocation
-            .latitude,
-        ],
-      },
-
-      label: address.label || "Home",
-
-      isDefault: true,
-    });
-  }
-
-} catch (addressError) {
-  // Address saving should NOT cancel a valid paid/order request.
-  console.error(
-    "AUTO SAVE ADDRESS ERROR:",
-    addressError
-  );
-}
-
-    // -----------------------------------------
+    // =======================================================
     // RECORD COUPON USAGE
-    // -----------------------------------------
-
+    // =======================================================
     if (appliedCoupon) {
       try {
         await CouponUsage.create({
-          couponId: appliedCoupon._id,
+          couponId:
+            appliedCoupon._id,
+
           userId,
-          orderId: order._id,
-          discountAmount: discount,
+
+          orderId:
+            order._id,
+
+          discountAmount:
+            discount,
+
           status: "used",
         });
 
@@ -928,32 +901,38 @@ try {
             },
           }
         );
-      } catch (couponUsageError) {
+      } catch (
+        couponUsageError
+      ) {
+        // Do not fail the order if coupon
+        // usage recording has an issue.
         console.error(
           "COUPON USAGE ERROR:",
-          couponUsageError
+          couponUsageError.message
         );
-
-        // Important:
-        // If coupon usage failed, do not silently
-        // pretend that the coupon was consumed.
       }
     }
 
-    // -----------------------------------------
+    // =======================================================
     // TELEGRAM ALERT
-    // -----------------------------------------
+    // =======================================================
+    try {
+      await sendTelegramAlert(order);
+    } catch (telegramError) {
+      console.error(
+        "TELEGRAM ALERT ERROR:",
+        telegramError.message
+      );
+    }
 
-    sendTelegramAlert(order);
-
-    // -----------------------------------------
+    // =======================================================
     // CONFIRMATION EMAIL
-    // -----------------------------------------
-
+    // =======================================================
     try {
       if (order.customerEmail) {
         await sendEmail({
-          to: order.customerEmail,
+          to:
+            order.customerEmail,
 
           from:
             process.env.ORDER_MAIL ||
@@ -979,12 +958,12 @@ try {
       );
     }
 
-    // -----------------------------------------
+    // =======================================================
     // RESPONSE
-    // -----------------------------------------
-
+    // =======================================================
     return res.status(201).json({
       success: true,
+
       message:
         "Order created successfully",
 
@@ -1007,21 +986,34 @@ try {
 
     return res.status(500).json({
       success: false,
-      message: err.message,
+
+      message:
+        err.message ||
+        "Unable to create order",
     });
   }
 };
 
+
+// =========================================================
+// GET ORDERS BY PHONE
+// =========================================================
 // export const getOrdersByPhone = async (req, res) => {
 //   const orders = await Order.find({
 //     customerPhone: req.params.phone,
 //   }).sort({ createdAt: -1 });
-
+//
 //   res.json(orders);
 // };
 
 
-export const getDeliveryEstimate = async (req, res) => {
+// =========================================================
+// GET DELIVERY ESTIMATE
+// =========================================================
+export const getDeliveryEstimate = async (
+  req,
+  res
+) => {
   try {
     const {
       latitude,
@@ -1031,7 +1023,9 @@ export const getDeliveryEstimate = async (req, res) => {
 
     if (
       latitude === undefined ||
-      longitude === undefined
+      latitude === null ||
+      longitude === undefined ||
+      longitude === null
     ) {
       return res.status(400).json({
         success: false,
@@ -1041,11 +1035,35 @@ export const getDeliveryEstimate = async (req, res) => {
       });
     }
 
+    const numericLatitude =
+      Number(latitude);
+
+    const numericLongitude =
+      Number(longitude);
+
     const numericOrderValue =
       Number(orderValue);
 
     if (
-      !Number.isFinite(numericOrderValue) ||
+      !Number.isFinite(
+        numericLatitude
+      ) ||
+      !Number.isFinite(
+        numericLongitude
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_LOCATION",
+        message:
+          "Invalid location coordinates",
+      });
+    }
+
+    if (
+      !Number.isFinite(
+        numericOrderValue
+      ) ||
       numericOrderValue < 0
     ) {
       return res.status(400).json({
@@ -1058,16 +1076,20 @@ export const getDeliveryEstimate = async (req, res) => {
 
     const delivery =
       await calculateDelivery({
-        latitude,
-        longitude,
-        orderValue: numericOrderValue,
+        latitude:
+          numericLatitude,
+
+        longitude:
+          numericLongitude,
+
+        orderValue:
+          numericOrderValue,
       });
 
     return res.status(200).json({
       success: true,
       data: delivery,
     });
-
   } catch (error) {
     console.error(
       "DELIVERY ESTIMATE ERROR:",
@@ -1080,7 +1102,8 @@ export const getDeliveryEstimate = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        code: "OUTSIDE_SERVICE_AREA",
+        code:
+          "OUTSIDE_SERVICE_AREA",
         message:
           "We are not serving in this area yet",
       });

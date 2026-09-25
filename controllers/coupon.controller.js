@@ -24,7 +24,7 @@ const getDiscount = (coupon, orderTotal) => {
   return Math.min(discount, orderTotal);
 };
 
-const checkEligibility = async (
+export const checkEligibility = async (
   coupon,
   user,
   orderTotal,
@@ -155,8 +155,28 @@ export const getAvailableCoupons = async (req, res) => {
   try {
     const user = req.user;
 
+    // Total ko safely parse karo
     const total = Number(req.query.total || 0);
 
+    // Items ko pehle initialize karo
+    let items = [];
+
+    try {
+      if (req.query.items) {
+        items = JSON.parse(req.query.items);
+      }
+    } catch (error) {
+      console.error("❌ COUPON ITEMS PARSE ERROR:", error);
+      items = [];
+    }
+
+    console.log("🎟️ COUPON API REQUEST:", {
+      userId: user?._id,
+      total,
+      items,
+    });
+
+    // Active coupons fetch karo
     const coupons = await Coupon.find({
       isActive: true,
     }).sort({
@@ -167,82 +187,75 @@ export const getAvailableCoupons = async (req, res) => {
     const result = [];
 
     for (const coupon of coupons) {
-      const eligibility = await checkEligibility(
-        coupon,
-        user,
-        total,
-        []
-      );
+  const eligibility = await checkEligibility(
+    coupon,
+    user,
+    total,
+    items
+  );
 
-      result.push({
-        id: coupon._id,
+  // User already used this coupon
+  // => available coupons list me mat bhejo
+  if (
+    !eligibility.eligible &&
+    eligibility.message === "You have already used this coupon"
+  ) {
+    continue;
+  }
 
+  result.push({
+    id: coupon._id,
+    code: coupon.code,
+    title: coupon.title,
+    description: coupon.description,
+
+    discountType: coupon.discountType,
+    discountValue: coupon.discountValue,
+    maxDiscount: coupon.maxDiscount,
+
+    minOrderValue: coupon.minOrderValue,
+
+    discount: eligibility.eligible
+      ? eligibility.discount
+      : 0,
+
+    autoApply: coupon.autoApply,
+
+    eligible: eligibility.eligible,
+
+    message: eligibility.eligible
+      ? null
+      : eligibility.message,
+
+    firstOrderOnly: coupon.firstOrderOnly,
+    newUsersOnly: coupon.newUsersOnly,
+
+    validFrom: coupon.validFrom,
+    validUntil: coupon.validUntil,
+  });
+}
+
+    console.log(
+      "🎟️ COUPON API RESPONSE:",
+      result.map((coupon) => ({
         code: coupon.code,
-
-        title: coupon.title,
-
-        description: coupon.description,
-
-        discountType: coupon.discountType,
-
-        discountValue: coupon.discountValue,
-
-        maxDiscount: coupon.maxDiscount,
-
-        minOrderValue: coupon.minOrderValue,
-
-        discount: eligibility.eligible
-          ? eligibility.discount
-          : 0,
-
-        autoApply: coupon.autoApply,
-
-        // ==========================================
-        // ELIGIBILITY
-        // ==========================================
-
-        eligible: eligibility.eligible,
-
-        // Why coupon is locked
-        message: eligibility.eligible
-          ? null
-          : eligibility.message,
-
-        // ==========================================
-        // USER TYPE RESTRICTIONS
-        // ==========================================
-
-        // 🔥 First-order coupon
-        firstOrderOnly:
-          coupon.firstOrderOnly,
-
-        // 🔥 New-user coupon
-        newUsersOnly:
-          coupon.newUsersOnly,
-
-        // ==========================================
-        // VALIDITY
-        // ==========================================
-
-        validFrom: coupon.validFrom,
-
-        validUntil: coupon.validUntil,
-      });
-    }
+        eligible: coupon.eligible,
+        discount: coupon.discount,
+        message: coupon.message,
+      }))
+    );
 
     return res.json({
       success: true,
       coupons: result,
     });
   } catch (error) {
-    console.error(
-      "GET AVAILABLE COUPONS ERROR:",
-      error
-    );
+    console.error("GET AVAILABLE COUPONS ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Unable to fetch coupons",
+      message: "Failed to fetch available coupons",
+      error: error.message,
     });
   }
 };
