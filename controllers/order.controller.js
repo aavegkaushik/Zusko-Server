@@ -879,19 +879,12 @@ export const createOrder = async (req, res) => {
     if (appliedCoupon) {
       try {
         await CouponUsage.create({
-          couponId:
-            appliedCoupon._id,
-
-          userId,
-
-          orderId:
-            order._id,
-
-          discountAmount:
-            discount,
-
-          status: "used",
-        });
+  couponId: appliedCoupon._id,
+  userId: order.customerId,
+  orderId: order._id,
+  discountAmount: discount,
+  status: "used",
+});
 
         await Coupon.findByIdAndUpdate(
           appliedCoupon._id,

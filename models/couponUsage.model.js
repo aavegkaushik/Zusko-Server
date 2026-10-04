@@ -33,6 +33,7 @@ const couponUsageSchema = new mongoose.Schema(
       type: String,
       enum: ["used", "cancelled", "refunded"],
       default: "used",
+      index: true,
     },
 
     usedAt: {
@@ -45,10 +46,23 @@ const couponUsageSchema = new mongoose.Schema(
   }
 );
 
-couponUsageSchema.index(
-  { couponId: 1, userId: 1 },
-  { unique: true }
-);
+// IMPORTANT:
+// Unique index hata diya.
+// Ab same user same coupon ko perUserLimit ke according
+// multiple times use kar sakta hai.
 
-export default mongoose.models.CouponUsage ||
-  mongoose.model("CouponUsage", couponUsageSchema);
+couponUsageSchema.index({
+  couponId: 1,
+  userId: 1,
+  status: 1,
+});
+
+couponUsageSchema.index({
+  couponId: 1,
+  status: 1,
+});
+
+export default mongoose.model(
+    "CouponUsage",
+    couponUsageSchema
+  );
