@@ -1,9 +1,20 @@
 import express from "express";
-import { addPaymentMethod, createRazorpayOrder, deletePaymentMethod, getPaymentMethods, payPendingOrder, setDefaultPaymentMethod, verifyPayment, refundPayment } from "../controllers/payment.controller.js";
-const router = express.Router();
-import {protect} from "../middleware/auth.middleware.js";
+import {
+  addPaymentMethod,
+  createRazorpayOrder,
+  deletePaymentMethod,
+  getPaymentMethods,
+  payPendingOrder,
+  setDefaultPaymentMethod,
+  verifyPayment,
+  refundPayment,
+} from "../controllers/payment.controller.js";
+import { protect } from "../middleware/auth.middleware.js";
+import { paymentLimiter } from "../middleware/redisRateLimiter.js";
 
-router.post("/create-order", protect, createRazorpayOrder);
+const router = express.Router();
+
+router.post("/create-order", protect, paymentLimiter, createRazorpayOrder);
 
 router.post("/verify", protect, verifyPayment);
 

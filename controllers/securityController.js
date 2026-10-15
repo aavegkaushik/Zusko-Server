@@ -9,7 +9,7 @@ export const getSessions = async (req, res) => {
       userId: req.user._id,
     }).sort({
       lastActive: -1,
-    });
+    }).lean();
 
     res.status(200).json({
       success: true,

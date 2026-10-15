@@ -1,6 +1,7 @@
 import Coupon from "../models/coupon.model.js";
 import CouponUsage from "../models/couponUsage.model.js";
 import Order from "../models/order.model.js";
+import { getCache, setCache, delCachePattern } from "../utils/cache.js";
 
 // ============================================================
 // CONSTANTS
@@ -242,13 +243,14 @@ const calculateDiscount = (
 // ============================================================
 
 const checkAudienceEligibility =
-  async (coupon, user) => {
+  async (coupon, user, preloadedStats = null) => {
     const audience =
       coupon.audienceType ||
       "everyone";
 
     const stats =
-      await getOrderStats(user._id);
+      preloadedStats ||
+      (await getOrderStats(user._id));
 
     // --------------------------------------------------------
     // SPECIFIC USERS
@@ -461,7 +463,8 @@ export const checkEligibility =
     user,
     orderTotal,
     items = [],
-    paymentMethod = null
+    paymentMethod = null,
+    preloadedStats = null
   ) => {
     const now = new Date();
 
@@ -574,7 +577,8 @@ export const checkEligibility =
     const audienceResult =
       await checkAudienceEligibility(
         coupon,
-        user
+        user,
+        preloadedStats
       );
 
     if (!audienceResult.eligible) {
@@ -878,14 +882,26 @@ export const getAvailableCoupons =
         req.query.paymentMethod ||
         null;
 
+      const itemsKey = typeof req.query.items === "string" ? req.query.items.slice(0, 100) : "";
+      const cacheKey = `coupons:available:${user?._id || "guest"}:${total}:${itemsKey}:${paymentMethod || ""}`;
+
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        return res.json({
+          success: true,
+          coupons: cached,
+        });
+      }
+
       const coupons =
         await Coupon.find({
           isActive: true,
         }).sort({
           autoApply: -1,
           createdAt: -1,
-        });
+        }).lean();
 
+      const preloadedStats = user?._id ? await getOrderStats(user._id) : null;
       const result = [];
 
       for (const coupon of coupons) {
@@ -895,7 +911,8 @@ export const getAvailableCoupons =
             user,
             total,
             items,
-            paymentMethod
+            paymentMethod,
+            preloadedStats
           );
 
         // Already-used coupons should
@@ -914,6 +931,9 @@ export const getAvailableCoupons =
           )
         );
       }
+
+      // Cache available coupons list with short TTL (45s)
+      await setCache(cacheKey, result, 45);
 
       return res.json({
         success: true,

@@ -456,6 +456,13 @@ OrderSchema.pre("findOneAndUpdate", function () {
   }
 });
 
+// Performance indexes for customer order queries
+OrderSchema.index({ customerId: 1, createdAt: -1 });
+OrderSchema.index({ customerPhone: 1, createdAt: -1 });
+OrderSchema.index({ customerId: 1, status: 1, createdAt: -1 });
+OrderSchema.index({ status: 1, createdAt: -1 });
+OrderSchema.index({ customerId: 1, "payment.status": 1 });
+
 // helper static
 OrderSchema.statics.getAllowedStatuses = function () {
   return STATUS_ENUM.slice();

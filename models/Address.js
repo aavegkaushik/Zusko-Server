@@ -111,4 +111,10 @@ addressSchema.index({
   location: "2dsphere",
 });
 
+addressSchema.index({
+  userId: 1,
+  isDefault: -1,
+  createdAt: -1,
+});
+
 export default mongoose.model("Address", addressSchema);

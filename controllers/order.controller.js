@@ -7,6 +7,8 @@ import CouponUsage from "../models/couponUsage.model.js";
 import { checkEligibility } from "./coupon.controller.js";
 import Address from "../models/Address.js";
 import { calculateDelivery } from "../services/deliveryService.js";
+import { getCache, setCache, delCache, delCachePattern } from "../utils/cache.js";
+import { emailQueue, notificationQueue, dispatchJob } from "../queues/queueManager.js";
 
 // import { refundPayment } from "./payment.controller.js";
 
@@ -24,7 +26,7 @@ export const getActiveOrders = async (req, res) => {
       status: {
         $nin: ["completed", "cancelled"],
       },
-    }).sort({ createdAt: -1 });
+    }).sort({ createdAt: -1 }).lean();
 
     return res.status(200).json({
       success: true,
@@ -53,7 +55,7 @@ export const getOrderHistory = async (req, res) => {
       status: {
         $in: ["completed", "cancelled"],
       },
-    }).sort({ createdAt: -1 });
+    }).sort({ createdAt: -1 }).lean();
 
     return res.status(200).json({
       success: true,
@@ -74,13 +76,24 @@ export const getOrderHistory = async (req, res) => {
 // =========================================================
 export const getOrderTracking = async (req, res) => {
   try {
+    const trackingCacheKey = `tracking:${req.params.id}`;
+
+    // Fast Redis read cache (20s TTL)
+    const cachedData = await getCache(trackingCacheKey);
+    if (cachedData) {
+      return res.status(200).json({
+        success: true,
+        data: cachedData,
+      });
+    }
+
     const order = await Order.findOne({
       _id: req.params.id,
       $or: [
         { customerId: req.user._id },
         { customerPhone: req.user.phone },
       ],
-    });
+    }).lean();
 
     if (!order) {
       return res.status(404).json({
@@ -89,42 +102,47 @@ export const getOrderTracking = async (req, res) => {
       });
     }
 
+    const trackingData = {
+      _id: order._id,
+      orderId: order.orderId,
+
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      customerEmail: order.customerEmail,
+
+      status: order.status,
+
+      pickup: order.pickup,
+      pickupContact: order.pickupContact,
+
+      address: order.address,
+
+      items: order.items,
+
+      originalTotal: order.originalTotal || 0,
+      handlingFee: order.handlingFee || 0,
+      deliveryFee: order.deliveryFee || 0,
+      discount: order.discount || 0,
+
+      total: order.total,
+
+      payment: order.payment,
+
+      history: order.history,
+
+      estimatedDelivery: order.estimatedDelivery || null,
+
+      deliveryAgent: order.deliveryAgent || null,
+
+      createdAt: order.createdAt,
+    };
+
+    // Cache tracking data with short TTL (20 seconds)
+    await setCache(trackingCacheKey, trackingData, 20);
+
     return res.status(200).json({
       success: true,
-      data: {
-        _id: order._id,
-        orderId: order.orderId,
-
-        customerName: order.customerName,
-        customerPhone: order.customerPhone,
-        customerEmail: order.customerEmail,
-
-        status: order.status,
-
-        pickup: order.pickup,
-        pickupContact: order.pickupContact,
-
-        address: order.address,
-
-        items: order.items,
-
-        originalTotal: order.originalTotal || 0,
-        handlingFee: order.handlingFee || 0,
-        deliveryFee: order.deliveryFee || 0,
-        discount: order.discount || 0,
-
-        total: order.total,
-
-        payment: order.payment,
-
-        history: order.history,
-
-        estimatedDelivery: order.estimatedDelivery || null,
-
-        deliveryAgent: order.deliveryAgent || null,
-
-        createdAt: order.createdAt,
-      },
+      data: trackingData,
     });
   } catch (error) {
     return res.status(500).json({
@@ -183,6 +201,9 @@ export const cancelOrder = async (req, res) => {
     });
 
     await order.save();
+
+    // Invalidate tracking cache on cancellation
+    await delCache(`tracking:${req.params.id}`);
 
     // Refund handling
     if (order.payment?.status === "paid") {
@@ -279,6 +300,9 @@ export const rateOrder = async (req, res) => {
         runValidators: false,
       }
     );
+
+    // Invalidate tracking cache on rating
+    await delCache(`tracking:${req.params.id}`);
 
     return res.status(200).json({
       success: true,
@@ -907,48 +931,49 @@ export const createOrder = async (req, res) => {
     }
 
     // =======================================================
-    // TELEGRAM ALERT
+    // ASYNC TELEGRAM ALERT & EMAIL VIA BULLMQ QUEUES
     // =======================================================
-    try {
-      await sendTelegramAlert(order);
-    } catch (telegramError) {
-      console.error(
-        "TELEGRAM ALERT ERROR:",
-        telegramError.message
-      );
-    }
+    const orderData = order.toObject ? order.toObject() : order;
 
-    // =======================================================
-    // CONFIRMATION EMAIL
-    // =======================================================
-    try {
-      if (order.customerEmail) {
-        await sendEmail({
-          to:
-            order.customerEmail,
+    // Invalidate available coupons cache for customer
+    await delCachePattern(`coupons:available:${userId}:*`);
 
-          from:
-            process.env.ORDER_MAIL ||
-            process.env.MAIL_FROM,
+    // Dispatch Telegram Alert via BullMQ queue (fallback to background task if Redis offline)
+    dispatchJob(
+      notificationQueue,
+      "send-telegram-order-alert",
+      { order: orderData },
+      async (data) => {
+        try {
+          await sendTelegramAlert(data.order);
+        } catch (tgErr) {
+          console.error("TELEGRAM ALERT FALLBACK ERROR:", tgErr.message);
+        }
+      },
+      { jobId: `tg-${orderData.orderId || order._id}` }
+    ).catch((err) => console.error("Error dispatching telegram job:", err.message));
 
-          subject:
-            `Your Zusko Order #${order.orderId} is Confirmed 🎉`,
-
-          html:
-            generateOrderPlacedEmail(
-              order.toObject()
-            ),
-        });
-
-        console.log(
-          `Order confirmation email sent to ${order.customerEmail}`
-        );
-      }
-    } catch (emailError) {
-      console.error(
-        "Order confirmation email failed:",
-        emailError.message
-      );
+    // Dispatch Confirmation Email via BullMQ queue (fallback to background task if Redis offline)
+    if (order.customerEmail) {
+      dispatchJob(
+        emailQueue,
+        "send-order-placed-email",
+        { order: orderData },
+        async (data) => {
+          try {
+            await sendEmail({
+              to: data.order.customerEmail,
+              from: process.env.ORDER_MAIL || process.env.MAIL_FROM,
+              subject: `Your Zusko Order #${data.order.orderId} is Confirmed 🎉`,
+              html: generateOrderPlacedEmail(data.order),
+            });
+            console.log(`Order confirmation email sent to ${data.order.customerEmail}`);
+          } catch (emailErr) {
+            console.error("Order confirmation email fallback failed:", emailErr.message);
+          }
+        },
+        { jobId: `email-${orderData.orderId || order._id}` }
+      ).catch((err) => console.error("Error dispatching email job:", err.message));
     }
 
     // =======================================================

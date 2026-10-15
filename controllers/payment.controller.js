@@ -2,6 +2,7 @@ import Razorpay from "razorpay";
 import crypto from "crypto";
 import User from "../models/user.model.js";
 import Order from "../models/order.model.js";
+import { delCache } from "../utils/cache.js";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -173,6 +174,23 @@ export const payPendingOrder = async (req, res) => {
       });
     }
 
+    // Idempotency: check if order is already paid
+    const existingOrder = await Order.findById(orderId);
+    if (!existingOrder) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (existingOrder.payment?.status === "paid") {
+      return res.status(200).json({
+        success: true,
+        message: "Order already paid",
+        data: existingOrder,
+      });
+    }
+
     const order = await Order.findByIdAndUpdate(
       orderId,
       {
@@ -185,12 +203,8 @@ export const payPendingOrder = async (req, res) => {
       { new: true }
     );
 
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
-    }
+    // Invalidate tracking cache
+    await delCache(`tracking:${orderId}`);
 
     res.json({
       success: true,

@@ -5,7 +5,7 @@ import Order from "../models/order.model.js";
 // GET USER PROFILE
 export const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("-password");
+    const user = await User.findById(req.user.id).select("-password").lean();
 
     if (!user) {
       return res.status(404).json({

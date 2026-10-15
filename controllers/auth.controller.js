@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { UAParser } from "ua-parser-js";
 import OTP from "../models/EmailOTP.js";
 import { sendEmail } from "../utils/sendEmail.js";
+import { setCache, delCache } from "../utils/cache.js";
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -53,6 +54,9 @@ export const sendOtp = async (req, res) => {
       otp,
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
+
+    // Cache OTP temporarily in Redis (5 min TTL)
+    await setCache(`otp:${email.toLowerCase()}`, otp, 300);
 
     await sendEmail({
       to: email,
@@ -369,6 +373,9 @@ export const loginUser = async (req, res) => {
     await OTP.deleteOne({
       _id: otpRecord._id,
     });
+
+    // Clear Redis OTP cache upon successful verification
+    await delCache(`otp:${email.toLowerCase()}`);
 
     return res.status(200).json({
       success: true,

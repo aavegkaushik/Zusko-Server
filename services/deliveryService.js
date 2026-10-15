@@ -9,6 +9,7 @@
 // 5. Serviceability verified using OpenStreetMap Nominatim
 // 6. Zusko reference location = Jail Churaha, Jhansi
 // =========================================================
+import { getCache, setCache } from "../utils/cache.js";
 
 const ZUSKO_LOCATION = {
   latitude: 25.4435332,
@@ -196,6 +197,12 @@ export const reverseGeocodeLocation = async (
   const lat = Number(latitude);
   const lng = Number(longitude);
 
+  const cacheKey = `geo:rev:${lat.toFixed(4)}:${lng.toFixed(4)}`;
+  const cached = await getCache(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const url =
     `${NOMINATIM_BASE_URL}/reverse` +
     `?format=jsonv2` +
@@ -268,7 +275,7 @@ export const reverseGeocodeLocation = async (
   const isJhansi =
     possibleCityNames.includes("jhansi");
 
-  return {
+  const result = {
     serviceable: isJhansi,
 
     displayName:
@@ -292,6 +299,10 @@ export const reverseGeocodeLocation = async (
     latitude: lat,
     longitude: lng,
   };
+
+  await setCache(cacheKey, result, 86400); // 24 hours
+
+  return result;
 };
 
 // =========================================================
@@ -371,6 +382,12 @@ export const getRoadDistanceKm = async (
   const customerLongitude =
     Number(longitude);
 
+  const cacheKey = `geo:dist:${customerLatitude.toFixed(4)}:${customerLongitude.toFixed(4)}`;
+  const cachedDist = await getCache(cacheKey);
+  if (cachedDist !== null && cachedDist !== undefined) {
+    return Number(cachedDist);
+  }
+
   // IMPORTANT:
   // OSRM expects longitude,latitude
   const url =
@@ -448,9 +465,13 @@ export const getRoadDistanceKm = async (
   const distanceKm =
     distanceMeters / 1000;
 
-  return Number(
+  const finalDistance = Number(
     distanceKm.toFixed(2)
   );
+
+  await setCache(cacheKey, finalDistance, 86400); // 24 hours
+
+  return finalDistance;
 };
 
 // =========================================================

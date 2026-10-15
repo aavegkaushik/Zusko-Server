@@ -44,4 +44,6 @@ const sessionSchema = new mongoose.Schema(
   }
 );
 
+sessionSchema.index({ userId: 1, token: 1 });
+
 export default mongoose.model("Session", sessionSchema);
