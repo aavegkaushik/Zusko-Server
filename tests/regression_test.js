@@ -68,8 +68,8 @@ async function runTests() {
     // 4. Delivery Service & Geocoding Caching
     console.log("\n--- 4. Delivery Service & Geo Calculation ---");
     // Reference location near Jhansi
-    const testLat = 25.4435;
-    const testLng = 78.5761;
+    const testLat = 25.4492;
+    const testLng = 78.5599;
     try {
       const dist = await getRoadDistanceKm(testLat, testLng);
       assert(typeof dist === "number" && dist >= 0, `Road distance calculated: ${dist} km`);

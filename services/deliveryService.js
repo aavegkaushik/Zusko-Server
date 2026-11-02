@@ -12,8 +12,8 @@
 import { getCache, setCache } from "../utils/cache.js";
 
 const ZUSKO_LOCATION = {
-  latitude: 25.4435332,
-  longitude: 78.57616,
+  latitude: 25.4492572,
+  longitude: 78.5599835,
 };
 
 // =========================================================
