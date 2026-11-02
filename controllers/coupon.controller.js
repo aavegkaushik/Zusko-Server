@@ -918,8 +918,9 @@ export const getAvailableCoupons =
         // Already-used coupons should
         // NEVER appear in available list.
         if (
-          eligibility.reason ===
-          "ALREADY_USED"
+          eligibility.reason === "ALREADY_USED" ||
+          eligibility.reason === "EXPIRED" ||
+          eligibility.reason === "INACTIVE"
         ) {
           continue;
         }

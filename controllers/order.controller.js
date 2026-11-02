@@ -13,16 +13,26 @@ import { emailQueue, notificationQueue, dispatchJob } from "../queues/queueManag
 // import { refundPayment } from "./payment.controller.js";
 
 
+// Helper to query user orders safely whether phone is set or empty
+const getUserOrderCriteria = (user) => {
+  if (user?.phone) {
+    return {
+      $or: [
+        { customerId: user._id },
+        { customerPhone: user.phone },
+      ],
+    };
+  }
+  return { customerId: user._id };
+};
+
 // =========================================================
 // GET ACTIVE ORDERS
 // =========================================================
 export const getActiveOrders = async (req, res) => {
   try {
     const orders = await Order.find({
-      $or: [
-        { customerId: req.user._id },
-        { customerPhone: req.user.phone },
-      ],
+      ...getUserOrderCriteria(req.user),
       status: {
         $nin: ["completed", "cancelled"],
       },
@@ -48,10 +58,7 @@ export const getActiveOrders = async (req, res) => {
 export const getOrderHistory = async (req, res) => {
   try {
     const orders = await Order.find({
-      $or: [
-        { customerId: req.user._id },
-        { customerPhone: req.user.phone },
-      ],
+      ...getUserOrderCriteria(req.user),
       status: {
         $in: ["completed", "cancelled"],
       },
@@ -89,10 +96,7 @@ export const getOrderTracking = async (req, res) => {
 
     const order = await Order.findOne({
       _id: req.params.id,
-      $or: [
-        { customerId: req.user._id },
-        { customerPhone: req.user.phone },
-      ],
+      ...getUserOrderCriteria(req.user),
     }).lean();
 
     if (!order) {
@@ -160,10 +164,7 @@ export const cancelOrder = async (req, res) => {
   try {
     const order = await Order.findOne({
       _id: req.params.id,
-      $or: [
-        { customerId: req.user._id },
-        { customerPhone: req.user.phone },
-      ],
+      ...getUserOrderCriteria(req.user),
     });
 
     if (!order) {
@@ -242,10 +243,7 @@ export const rateOrder = async (req, res) => {
 
     const order = await Order.findOne({
       _id: req.params.id,
-      $or: [
-        { customerId: req.user._id },
-        { customerPhone: req.user.phone },
-      ],
+      ...getUserOrderCriteria(req.user),
     });
 
     if (!order) {

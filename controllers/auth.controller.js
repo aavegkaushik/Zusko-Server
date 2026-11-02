@@ -328,35 +328,23 @@ export const loginUser = async (req, res) => {
     // New User
     if (!user) {
       user = await User.create({
-        name: name || "Guest",
+        name: name ? name.trim() : "Guest",
         email: email.toLowerCase(),
         isEmailVerified: true,
-        phone,
+        phone: phone ? phone.trim() : "",
       });
     }
 
     // Existing User
     else {
       user.isEmailVerified = true;
-      if (name) {
-        user.name = name;
+      if (name && name.trim()) {
+        user.name = name.trim();
       }
 
-      // Update phone if changed
-      if (phone && phone !== user.phone) {
-        const existingPhone = await User.findOne({ phone });
-
-        if (
-          existingPhone &&
-          existingPhone._id.toString() !== user._id.toString()
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: "Phone number already in use",
-          });
-        }
-
-        user.phone = phone;
+      // Update phone if provided (informational field, independent of login)
+      if (phone !== undefined && phone !== null) {
+        user.phone = phone.trim();
       }
 
       await user.save();

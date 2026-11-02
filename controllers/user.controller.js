@@ -68,25 +68,9 @@ export const updateProfile = async (req, res) => {
 }
     // user.email = email || user.email;
 
-    if (phone && phone !== user.phone) {
-
-  const existingUser =
-    await User.findOne({ phone });
-
-  if (
-    existingUser &&
-    existingUser._id.toString() !==
-      user._id.toString()
-  ) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Phone number already exists",
-    });
-  }
-
-  user.phone = phone;
-}
+    if (phone !== undefined && phone !== null) {
+      user.phone = phone.trim();
+    }
 
     await user.save();
 

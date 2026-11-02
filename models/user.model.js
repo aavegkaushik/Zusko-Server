@@ -4,24 +4,24 @@ const userSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true,
+      default: "Guest",
     },
 
     email: {
-    type: String,
-    required: true,
-    unique: true,
-    lowercase: true,
-    trim: true,
-},
-isEmailVerified: {
-  type: Boolean,
-  default: false,
-},
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
 
     phone: {
       type: String,
-      unique: true,
+      default: "",
     },
 
     // password: {
@@ -106,5 +106,10 @@ isEmailVerified: {
 const User =
   mongoose.models.User ||
   mongoose.model("User", userSchema);
+
+// Safely drop legacy unique index on phone if present in MongoDB collection
+if (User.collection) {
+  User.collection.dropIndex("phone_1").catch(() => {});
+}
 
 export default User;

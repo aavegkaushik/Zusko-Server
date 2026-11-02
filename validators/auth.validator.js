@@ -2,32 +2,43 @@ import { body, validationResult } from "express-validator";
 
 export const signupValidation = [
   body("name")
-    .trim()
-    .notEmpty()
-    .withMessage("Name is required"),
+    .optional({ checkFalsy: true })
+    .trim(),
 
   body("email")
+    .trim()
+    .notEmpty()
+    .withMessage("Email is required")
     .isEmail()
     .withMessage("Invalid email")
     .normalizeEmail(),
 
   body("phone")
-    .isLength({ max: 10 })
-    .withMessage("Enter a valid mobile number"),
+    .optional({ checkFalsy: true })
+    .trim(),
 ];
 
 export const loginValidation = [
   body("email")
-    .isEmail()
-    .withMessage("Invalid email"),
-
-    body("name")
+    .trim()
     .notEmpty()
-    .withMessage("Name is required"),
+    .withMessage("Email is required")
+    .isEmail()
+    .withMessage("Invalid email")
+    .normalizeEmail(),
+
+  body("otp")
+    .trim()
+    .notEmpty()
+    .withMessage("OTP is required"),
+
+  body("name")
+    .optional({ checkFalsy: true })
+    .trim(),
 
   body("phone")
-    .notEmpty()
-    .withMessage("Phone Number is required"),
+    .optional({ checkFalsy: true })
+    .trim(),
 ];
 
 export const validate = (req, res, next) => {
