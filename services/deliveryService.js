@@ -20,7 +20,7 @@ const ZUSKO_LOCATION = {
 // DELIVERY CONFIG
 // =========================================================
 
-export const DELIVERY_RATE_PER_KM = 10;
+export const DELIVERY_RATE_PER_KM = 4.72;
 
 // This is NOT a minimum order restriction.
 // It is only the threshold for FREE delivery.
