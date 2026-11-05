@@ -4,6 +4,16 @@ const { Schema } = mongoose;
 
 const ItemSchema = new Schema(
   {
+    clothId: {
+      type: Schema.Types.ObjectId,
+      ref: "Pricing",
+    },
+
+    pricingId: {
+      type: Schema.Types.ObjectId,
+      ref: "Pricing",
+    },
+
     name: { type: String, required: true },
 
     qty: {
@@ -12,15 +22,71 @@ const ItemSchema = new Schema(
       min: 1,
     },
 
+    // Final unit price (preserves backwards compatibility)
     price: {
       type: Number,
       required: true,
       min: 0,
     },
 
+    finalPrice: {
+      type: Number,
+      default: 0,
+    },
+
+    // Original unit price before dynamic promotional discount
+    originalPrice: {
+      type: Number,
+      default: 0,
+    },
+
+    // Promotional discount per unit
+    discountAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    discountPercentage: {
+      type: Number,
+      default: 0,
+    },
+
+    lineTotal: {
+      type: Number,
+      default: 0,
+    },
+
+    originalLineTotal: {
+      type: Number,
+      default: 0,
+    },
+
+    appliedPromotionName: {
+      type: String,
+      default: "",
+    },
+
+    appliedPromotion: {
+      id: { type: Schema.Types.ObjectId, ref: "Promotion" },
+      name: { type: String, default: "" },
+      badgeText: { type: String, default: "" },
+      discountType: { type: String, default: "" },
+      discountValue: { type: Number, default: 0 },
+    },
+
     service: {
       type: String,
       required: true,
+    },
+
+    category: {
+      type: String,
+      default: "",
+    },
+
+    variant: {
+      type: String,
+      default: "",
     },
 
     // Premium / Regular Care
@@ -152,6 +218,16 @@ discount: {
   default: 0,
 },
 
+promotionalDiscount: {
+  type: Number,
+  default: 0,
+},
+
+coupon: {
+  code: { type: String, default: "" },
+  discount: { type: Number, default: 0 },
+},
+
 deliveryFee: {
   type: Number,
   default: 0,
@@ -248,7 +324,10 @@ handlingFee: {
       default: [],
     },
   },
-  { timestamps: { createdAt: "createdAt", updatedAt: "updatedAt" } },
+  {
+    timestamps: { createdAt: "createdAt", updatedAt: "updatedAt" },
+    collection: "orders",
+  },
 );
 
 // Pre-save hook: recompute total, push status history if changed

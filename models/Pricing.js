@@ -70,6 +70,7 @@ const PricingSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    collection: "pricings",
   }
 );
 

@@ -468,6 +468,28 @@ export const checkEligibility =
   ) => {
     const now = new Date();
 
+    // --------------------------------------------------------
+    // PROMOTION STACKING CHECK
+    // Prevent unintended stacking of promotional discounts and coupons
+    // --------------------------------------------------------
+    const hasDisallowedPromoStacking =
+      Array.isArray(items) &&
+      items.some(
+        (it) =>
+          (it?.isDiscounted ||
+            Number(it?.discountAmount) > 0 ||
+            it?.appliedPromotion) &&
+          it?.appliedPromotion?.allowCouponStacking !== true
+      );
+
+    if (hasDisallowedPromoStacking) {
+      return {
+        eligible: false,
+        reason: "PROMOTION_NO_STACKING",
+        message: "Coupons cannot be combined with promotional discounts",
+      };
+    }
+
     const total = toNumber(
       orderTotal,
       0

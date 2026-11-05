@@ -9,6 +9,13 @@ import Address from "../models/Address.js";
 import { calculateDelivery } from "../services/deliveryService.js";
 import { getCache, setCache, delCache, delCachePattern } from "../utils/cache.js";
 import { emailQueue, notificationQueue, dispatchJob } from "../queues/queueManager.js";
+import Pricing from "../models/Pricing.js";
+import Promotion from "../models/Promotion.js";
+import {
+  isPromotionActive,
+  calculateItemPromotionalPricing,
+} from "../utils/promotionCalculator.js";
+import mongoose from "mongoose";
 
 // import { refundPayment } from "./payment.controller.js";
 
@@ -124,9 +131,11 @@ export const getOrderTracking = async (req, res) => {
       items: order.items,
 
       originalTotal: order.originalTotal || 0,
+      promotionalDiscount: order.promotionalDiscount || 0,
       handlingFee: order.handlingFee || 0,
       deliveryFee: order.deliveryFee || 0,
       discount: order.discount || 0,
+      coupon: order.coupon || null,
 
       total: order.total,
 
@@ -366,60 +375,143 @@ export const createOrder = async (req, res) => {
     }
 
     // =======================================================
-    // FORMAT ITEMS
+    // RECALCULATE PRICES USING TRUSTED DATABASE RECORDS
+    // NEVER TRUST FRONTEND-SUBMITTED PRICES, DISCOUNTS OR TOTALS
     // =======================================================
-    const formattedItems = items.map((item) => ({
-      name: String(item?.name || "").trim(),
+    const now = new Date();
 
-      qty: Number(item?.qty || 0),
+    // 1. Fetch active promotions from MongoDB
+    let activePromotions = [];
+    try {
+      activePromotions = await Promotion.find({
+        isActive: true,
+        $and: [
+          { $or: [{ startDate: null }, { startDate: { $lte: now } }] },
+          { $or: [{ endDate: null }, { endDate: { $gte: now } }] },
+        ],
+      })
+        .sort({ priority: -1, updatedAt: -1 })
+        .lean();
+    } catch (promoErr) {
+      console.warn("Could not query promotions for checkout:", promoErr.message);
+      activePromotions = [];
+    }
 
-      price: Number(item?.price || 0),
+    // 2. Fetch Pricing documents from MongoDB for all items
+    const pricingIds = items
+      .map((it) => it.pricingId || it.clothId || it._id)
+      .filter((id) => id && mongoose.isValidObjectId(id));
 
-      service: String(item?.service || "").trim(),
+    const itemNames = items
+      .map((it) => (typeof it.name === "string" ? it.name.trim() : ""))
+      .filter(Boolean);
 
-      careLevel:
-        item?.careLevel === "premium"
-          ? "premium"
-          : "regular",
-    }));
+    const pricingDocs = await Pricing.find({
+      $or: [
+        ...(pricingIds.length ? [{ _id: { $in: pricingIds } }] : []),
+        ...(itemNames.length ? [{ name: { $in: itemNames } }] : []),
+      ],
+    }).lean();
 
-    // -------------------------------------------------------
-    // INVALID ITEM CHECK
-    // -------------------------------------------------------
-    const invalidItem = formattedItems.find(
-      (item) =>
-        !item.name ||
-        !item.service ||
-        !Number.isFinite(item.qty) ||
-        item.qty <= 0 ||
-        !Number.isFinite(item.price) ||
-        item.price < 0
-    );
+    const findPricingDoc = (item) => {
+      const targetId = String(item.pricingId || item.clothId || item._id || "");
+      if (targetId) {
+        const found = pricingDocs.find((p) => String(p._id) === targetId);
+        if (found) return found;
+      }
+      return (
+        pricingDocs.find(
+          (p) =>
+            p.name?.trim().toLowerCase() === String(item.name || "").trim().toLowerCase() &&
+            p.service === item.service &&
+            (item.service === "Dry Clean"
+              ? (p.careLevel || "regular") === (item.careLevel || "regular")
+              : true) &&
+            (item.category ? p.category === item.category : true)
+        ) ||
+        pricingDocs.find(
+          (p) =>
+            p.name?.trim().toLowerCase() === String(item.name || "").trim().toLowerCase() &&
+            p.service === item.service
+        )
+      );
+    };
 
-    if (invalidItem) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid item details",
+    // 3. Format items and permanently snapshot prices and promotion data
+    const formattedItems = [];
+    for (const item of items) {
+      const qty = Math.max(1, Math.floor(Number(item.qty || item.quantity || 1)));
+      const pricingDoc = findPricingDoc(item);
+
+      if (!pricingDoc) {
+        return res.status(400).json({
+          success: false,
+          message: `Item not available in pricing catalog: ${item.name || "Unknown item"}`,
+        });
+      }
+
+      // Compute dynamic discount using trusted original price from database
+      const promoPricing = calculateItemPromotionalPricing(
+        pricingDoc,
+        activePromotions,
+        now
+      );
+
+      const originalUnitPrice = Number(pricingDoc.price) || 0;
+      const discountAmount = Number(promoPricing.discountAmount) || 0;
+      const discountPercentage = Number(promoPricing.discountPercentage) || 0;
+      const finalUnitPrice = Number(promoPricing.finalPrice) || originalUnitPrice;
+      const lineTotal = Math.round(finalUnitPrice * qty * 100) / 100;
+      const originalLineTotal = Math.round(originalUnitPrice * qty * 100) / 100;
+
+      formattedItems.push({
+        clothId: pricingDoc._id,
+        pricingId: pricingDoc._id,
+        name: pricingDoc.name,
+        service: pricingDoc.service,
+        category: pricingDoc.category || item.category || "",
+        variant: pricingDoc.variant || item.variant || "",
+        careLevel:
+          pricingDoc.service === "Dry Clean"
+            ? item.careLevel === "premium" || pricingDoc.careLevel === "premium"
+              ? "premium"
+              : "regular"
+            : "regular",
+        qty,
+        originalPrice: originalUnitPrice,
+        discountPercentage,
+        discountAmount,
+        finalPrice: finalUnitPrice,
+        price: finalUnitPrice, // Maintains backward compatibility for invoice/tracking
+        lineTotal,
+        originalLineTotal,
+        appliedPromotionName: promoPricing.appliedPromotionName || "",
+        appliedPromotion: promoPricing.appliedPromotion || null,
       });
     }
 
-    // =======================================================
-    // SERVER-SIDE SUBTOTAL
-    // NEVER TRUST FRONTEND TOTAL
-    // =======================================================
+    if (formattedItems.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid items in order",
+      });
+    }
+
+    // Server-side subtotal recalculation - NEVER trust client prices
     const originalTotal =
       Math.round(
-        formattedItems.reduce(
-          (sum, item) =>
-            sum + item.qty * item.price,
-          0
-        ) * 100
+        formattedItems.reduce((sum, item) => sum + item.originalLineTotal, 0) * 100
       ) / 100;
 
-    if (
-      !Number.isFinite(originalTotal) ||
-      originalTotal <= 0
-    ) {
+    const discountedSubtotal =
+      Math.round(
+        formattedItems.reduce((sum, item) => sum + item.lineTotal, 0) * 100
+      ) / 100;
+
+    const promotionalDiscount =
+      Math.round((originalTotal - discountedSubtotal) * 100) / 100;
+
+    if (!Number.isFinite(discountedSubtotal) || discountedSubtotal < 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid order amount",
@@ -463,7 +555,7 @@ export const createOrder = async (req, res) => {
         await calculateDelivery({
           latitude: Number(latitude),
           longitude: Number(longitude),
-          orderValue: originalTotal,
+          orderValue: discountedSubtotal,
         });
     } catch (error) {
       if (
@@ -482,9 +574,11 @@ export const createOrder = async (req, res) => {
     }
 
     const serverDeliveryFee =
-      Number(
-        deliveryCalculation?.deliveryFee || 0
-      );
+      discountedSubtotal >= 499
+        ? 0
+        : Number(
+            deliveryCalculation?.deliveryFee || 0
+          );
 
     const roadDistanceKm =
       Number(
@@ -500,10 +594,10 @@ export const createOrder = async (req, res) => {
     // HANDLING FEE
     // =======================================================
     const handlingFee =
-      originalTotal > 0 ? 15 : 0;
+      discountedSubtotal > 0 ? 15 : 0;
 
     // =======================================================
-    // COUPON VALIDATION
+    // COUPON VALIDATION & STACKING PREVENTION
     // =======================================================
     let discount = 0;
     let appliedCoupon = null;
@@ -516,6 +610,23 @@ export const createOrder = async (req, res) => {
         String(couponCode)
           .trim()
           .toUpperCase();
+
+      // Check stacking restriction:
+      // Prevent unintended stacking of promotional discounts and coupons
+      const disallowsStacking = formattedItems.some(
+        (it) =>
+          it.discountAmount > 0 &&
+          it.appliedPromotion?.allowCouponStacking !== true
+      );
+
+      if (promotionalDiscount > 0 && disallowsStacking) {
+        return res.status(400).json({
+          success: false,
+          code: "PROMOTION_NO_STACKING",
+          message:
+            "Coupons cannot be combined with promotional discounts",
+        });
+      }
 
       const coupon =
         await Coupon.findOne({
@@ -531,12 +642,12 @@ export const createOrder = async (req, res) => {
         });
       }
 
-      // Use centralized coupon eligibility logic
+      // Use centralized coupon eligibility logic against trusted discountedSubtotal
       const eligibility =
         await checkEligibility(
           coupon,
           req.user,
-          originalTotal,
+          discountedSubtotal,
           formattedItems
         );
 
@@ -566,7 +677,7 @@ export const createOrder = async (req, res) => {
       Math.max(
         Math.round(
           (
-            originalTotal +
+            discountedSubtotal +
             serverDeliveryFee +
             handlingFee -
             discount
@@ -631,9 +742,21 @@ export const createOrder = async (req, res) => {
 
         originalTotal,
 
-        handlingFee,
+        promotionalDiscount,
 
         discount,
+
+        coupon: appliedCoupon
+          ? {
+              code: appliedCoupon.code,
+              discount,
+            }
+          : {
+              code: "",
+              discount: 0,
+            },
+
+        handlingFee,
 
         deliveryFee:
           serverDeliveryFee,
