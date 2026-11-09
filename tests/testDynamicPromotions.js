@@ -493,21 +493,28 @@ console.log("\n--- Group 9: Coupon Stacking Rules ---");
     },
   ];
 
-  const hasNonStackablePromo1 = cartWithNoStackPromo.some((item) => {
-    return item.isDiscounted && item.appliedPromotion?.allowCouponStacking !== true;
-  });
-
-  const hasNonStackablePromo2 = cartWithStackablePromo.some((item) => {
-    return item.isDiscounted && item.appliedPromotion?.allowCouponStacking !== true;
-  });
+  // Test strict rule: If ANY item in cart is already discounted, coupons are NOT eligible
+  const isCouponBlockedByDiscount = (items) => {
+    return items.some(
+      (it) =>
+        it?.isDiscounted === true ||
+        Number(it?.discountAmount) > 0 ||
+        Boolean(it?.appliedPromotion) ||
+        (it?.originalPrice && it?.finalPrice && Number(it.finalPrice) < Number(it.originalPrice))
+    );
+  };
 
   assert(
-    hasNonStackablePromo1 === true,
-    "9.1 Rejects coupon stacking when promotion has allowCouponStacking: false"
+    isCouponBlockedByDiscount(cartWithNoStackPromo) === true,
+    "9.1 Rejects coupons when cart has already discounted item"
   );
   assert(
-    hasNonStackablePromo2 === false,
-    "9.2 Permits coupon stacking when promotion has allowCouponStacking: true"
+    isCouponBlockedByDiscount(cartWithStackablePromo) === true,
+    "9.2 Any discounted item disqualifies coupons"
+  );
+  assert(
+    isCouponBlockedByDiscount([{ isDiscounted: false, discountAmount: 0 }]) === false,
+    "9.3 Non-discounted regular cart remains eligible for coupons"
   );
 }
 

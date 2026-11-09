@@ -256,6 +256,20 @@ handlingFee: {
         index: true,
       },
 
+      razorpayOrderId: {
+        type: String,
+        index: true,
+      },
+
+      razorpayPaymentId: {
+        type: String,
+        index: true,
+      },
+
+      razorpaySignature: {
+        type: String,
+      },
+
       amount: {
         type: Number,
         min: 0,

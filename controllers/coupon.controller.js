@@ -470,23 +470,25 @@ export const checkEligibility =
 
     // --------------------------------------------------------
     // PROMOTION STACKING CHECK
-    // Prevent unintended stacking of promotional discounts and coupons
+    // If any item in cart is already discounted, coupons cannot be applied
     // --------------------------------------------------------
-    const hasDisallowedPromoStacking =
+    const hasDiscountedItem =
       Array.isArray(items) &&
       items.some(
         (it) =>
-          (it?.isDiscounted ||
-            Number(it?.discountAmount) > 0 ||
-            it?.appliedPromotion) &&
-          it?.appliedPromotion?.allowCouponStacking !== true
+          it?.isDiscounted === true ||
+          Number(it?.discountAmount) > 0 ||
+          Number(it?.discountPercentage) > 0 ||
+          Boolean(it?.appliedPromotion) ||
+          (it?.originalPrice && it?.finalPrice && Number(it.finalPrice) < Number(it.originalPrice)) ||
+          (it?.originalPrice && it?.price && Number(it.price) < Number(it.originalPrice))
       );
 
-    if (hasDisallowedPromoStacking) {
+    if (hasDiscountedItem) {
       return {
         eligible: false,
         reason: "PROMOTION_NO_STACKING",
-        message: "Coupons cannot be combined with promotional discounts",
+        message: "Coupons cannot be applied to already discounted items",
       };
     }
 
@@ -915,6 +917,28 @@ export const getAvailableCoupons =
         });
       }
 
+      // If cart contains already discounted items, coupons are not eligible and should not be shown
+      const hasDiscountedItems =
+        Array.isArray(items) &&
+        items.some(
+          (it) =>
+            it?.isDiscounted === true ||
+            Number(it?.discountAmount) > 0 ||
+            Number(it?.discountPercentage) > 0 ||
+            Boolean(it?.appliedPromotion) ||
+            (it?.originalPrice && it?.finalPrice && Number(it.finalPrice) < Number(it.originalPrice)) ||
+            (it?.originalPrice && it?.price && Number(it.price) < Number(it.originalPrice))
+        );
+
+      if (hasDiscountedItems) {
+        return res.json({
+          success: true,
+          coupons: [],
+          hasDiscountedItems: true,
+          message: "Coupons cannot be applied to already discounted items",
+        });
+      }
+
       const coupons =
         await Coupon.find({
           isActive: true,
@@ -937,12 +961,12 @@ export const getAvailableCoupons =
             preloadedStats
           );
 
-        // Already-used coupons should
-        // NEVER appear in available list.
+        // Ineligible coupons should NEVER appear in available list
         if (
           eligibility.reason === "ALREADY_USED" ||
           eligibility.reason === "EXPIRED" ||
-          eligibility.reason === "INACTIVE"
+          eligibility.reason === "INACTIVE" ||
+          eligibility.reason === "PROMOTION_NO_STACKING"
         ) {
           continue;
         }

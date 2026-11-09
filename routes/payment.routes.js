@@ -8,11 +8,15 @@ import {
   setDefaultPaymentMethod,
   verifyPayment,
   refundPayment,
+  handleRazorpayWebhook,
 } from "../controllers/payment.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { paymentLimiter } from "../middleware/redisRateLimiter.js";
 
 const router = express.Router();
+
+// Public Webhook route for Razorpay asynchronous payment events
+router.post("/webhook", handleRazorpayWebhook);
 
 router.post("/create-order", protect, paymentLimiter, createRazorpayOrder);
 

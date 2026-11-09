@@ -24,7 +24,7 @@ export const DELIVERY_RATE_PER_KM = 4.72;
 
 // This is NOT a minimum order restriction.
 // It is only the threshold for FREE delivery.
-export const FREE_DELIVERY_THRESHOLD = 500;
+export const FREE_DELIVERY_THRESHOLD = 499;
 
 // Backward compatibility if other files import MIN_ORDER_VALUE.
 export const MIN_ORDER_VALUE = FREE_DELIVERY_THRESHOLD;
@@ -339,11 +339,25 @@ export const checkJhansiServiceability = async (
     throw error;
   }
 
-  const location =
-    await reverseGeocodeLocation(
-      latitude,
-      longitude
-    );
+  let location;
+  try {
+    location =
+      await reverseGeocodeLocation(
+        latitude,
+        longitude
+      );
+  } catch (geoErr) {
+    console.warn("Reverse geocode external API failed, using Jhansi bounds verification fallback:", geoErr.message);
+    // Since coordinates are verified inside Jhansi bounds, safely treat as Jhansi serviceable
+    location = {
+      serviceable: true,
+      displayName: "Jhansi, Uttar Pradesh",
+      city: "Jhansi",
+      state: "Uttar Pradesh",
+      latitude: Number(latitude),
+      longitude: Number(longitude),
+    };
+  }
 
   if (!location.serviceable) {
     const error = new Error(
@@ -359,7 +373,7 @@ export const checkJhansiServiceability = async (
 };
 
 // =========================================================
-// ROAD DISTANCE USING OSRM
+// ROAD DISTANCE USING OSRM (WITH FAULT-TOLERANT FALLBACK)
 // =========================================================
 
 export const getRoadDistanceKm = async (
@@ -388,18 +402,28 @@ export const getRoadDistanceKm = async (
     return Number(cachedDist);
   }
 
-  // IMPORTANT:
-  // OSRM expects longitude,latitude
-  const url =
-    `${OSRM_BASE_URL}/route/v1/driving/` +
-    `${ZUSKO_LOCATION.longitude},${ZUSKO_LOCATION.latitude};` +
-    `${customerLongitude},${customerLatitude}` +
-    `?overview=false&steps=false`;
-
-  let response;
+  // Helper for straight-line Haversine fallback with road winding factor
+  const computeFallbackDistance = () => {
+    const straightDist = calculateStraightDistanceKm(
+      ZUSKO_LOCATION.latitude,
+      ZUSKO_LOCATION.longitude,
+      customerLatitude,
+      customerLongitude
+    );
+    // Standard urban road winding factor is 1.3x straight line distance
+    return Math.max(1, Math.round(straightDist * 1.3 * 100) / 100);
+  };
 
   try {
-    response = await fetchWithTimeout(
+    // IMPORTANT:
+    // OSRM expects longitude,latitude
+    const url =
+      `${OSRM_BASE_URL}/route/v1/driving/` +
+      `${ZUSKO_LOCATION.longitude},${ZUSKO_LOCATION.latitude};` +
+      `${customerLongitude},${customerLatitude}` +
+      `?overview=false&steps=false`;
+
+    const response = await fetchWithTimeout(
       url,
       {
         headers: {
@@ -407,71 +431,55 @@ export const getRoadDistanceKm = async (
         },
       }
     );
-  } catch (error) {
-    const routingError = new Error(
-      "Unable to calculate road distance"
+
+    if (!response.ok) {
+      console.warn(`OSRM returned HTTP ${response.status}, using road-factor fallback`);
+      const fallbackDist = computeFallbackDistance();
+      await setCache(cacheKey, fallbackDist, 86400);
+      return fallbackDist;
+    }
+
+    const data = await response.json();
+
+    if (
+      data.code !== "Ok" ||
+      !Array.isArray(data.routes) ||
+      data.routes.length === 0
+    ) {
+      console.warn("OSRM returned no route, using road-factor fallback");
+      const fallbackDist = computeFallbackDistance();
+      await setCache(cacheKey, fallbackDist, 86400);
+      return fallbackDist;
+    }
+
+    const distanceMeters =
+      Number(data.routes[0].distance);
+
+    if (
+      !Number.isFinite(distanceMeters) ||
+      distanceMeters < 0
+    ) {
+      const fallbackDist = computeFallbackDistance();
+      await setCache(cacheKey, fallbackDist, 86400);
+      return fallbackDist;
+    }
+
+    const distanceKm =
+      distanceMeters / 1000;
+
+    const finalDistance = Number(
+      distanceKm.toFixed(2)
     );
 
-    routingError.code =
-      error?.code ||
-      "ROUTING_UNAVAILABLE";
+    await setCache(cacheKey, finalDistance, 86400); // 24 hours
 
-    throw routingError;
+    return finalDistance;
+  } catch (err) {
+    console.warn("OSRM routing request failed/timed out, using road-factor fallback:", err.message);
+    const fallbackDist = computeFallbackDistance();
+    await setCache(cacheKey, fallbackDist, 86400);
+    return fallbackDist;
   }
-
-  if (!response.ok) {
-    const error = new Error(
-      "Unable to calculate road distance"
-    );
-
-    error.code = "ROUTING_UNAVAILABLE";
-
-    throw error;
-  }
-
-  const data = await response.json();
-
-  if (
-    data.code !== "Ok" ||
-    !Array.isArray(data.routes) ||
-    data.routes.length === 0
-  ) {
-    const error = new Error(
-      "Route not found for this location"
-    );
-
-    error.code = "ROUTE_NOT_FOUND";
-
-    throw error;
-  }
-
-  const distanceMeters =
-    Number(data.routes[0].distance);
-
-  if (
-    !Number.isFinite(distanceMeters) ||
-    distanceMeters < 0
-  ) {
-    const error = new Error(
-      "Invalid road distance returned by routing service"
-    );
-
-    error.code =
-      "INVALID_ROUTE_DISTANCE";
-
-    throw error;
-  }
-
-  const distanceKm =
-    distanceMeters / 1000;
-
-  const finalDistance = Number(
-    distanceKm.toFixed(2)
-  );
-
-  await setCache(cacheKey, finalDistance, 86400); // 24 hours
-
-  return finalDistance;
 };
 
 // =========================================================

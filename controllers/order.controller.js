@@ -16,8 +16,8 @@ import {
   calculateItemPromotionalPricing,
 } from "../utils/promotionCalculator.js";
 import mongoose from "mongoose";
-
-// import { refundPayment } from "./payment.controller.js";
+import crypto from "crypto";
+import { refundPayment, razorpay } from "./payment.controller.js";
 
 
 // Helper to query user orders safely whether phone is set or empty
@@ -31,6 +31,58 @@ const getUserOrderCriteria = (user) => {
     };
   }
   return { customerId: user._id };
+};
+
+// Validate that pickup slot is in the future and time slot has not elapsed
+export const validatePickupSlot = (pickup) => {
+  if (!pickup || typeof pickup !== "object") {
+    return { valid: false, message: "Pickup schedule details are required" };
+  }
+
+  const { date, time } = pickup;
+  if (!date || !time) {
+    return { valid: false, message: "Pickup date and time slot are required" };
+  }
+
+  const normalizedPickupDate = String(date).split("T")[0];
+  const pickupDateObj = new Date(normalizedPickupDate);
+  if (isNaN(pickupDateObj.getTime())) {
+    return { valid: false, message: "Invalid pickup date format" };
+  }
+
+  // Calculate current date and hour in Indian Standard Time (UTC + 5:30)
+  const now = new Date();
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + istOffsetMs);
+  const istTodayStr = istNow.toISOString().split("T")[0]; // YYYY-MM-DD in IST
+
+  // 1. Date cannot be before today in IST
+  if (normalizedPickupDate < istTodayStr) {
+    return { valid: false, message: "Pickup date cannot be in the past" };
+  }
+
+  // 2. If pickup date is today in IST, validate that the time slot has not elapsed
+  if (normalizedPickupDate === istTodayStr) {
+    const currentHourIST = istNow.getUTCHours(); // Hours 0-23 in IST
+
+    const slotEndHours = {
+      "9 AM - 12 PM": 12,
+      "12 PM - 3 PM": 15,
+      "3 PM - 6 PM": 18,
+      "10:00 AM - 01:00 PM": 13,
+    };
+
+    const trimmedTime = String(time).trim();
+    const endHour = slotEndHours[trimmedTime];
+    if (endHour !== undefined && currentHourIST >= endHour) {
+      return {
+        valid: false,
+        message: `The selected pickup slot (${trimmedTime}) for today has already passed. Please choose an upcoming time slot.`,
+      };
+    }
+  }
+
+  return { valid: true };
 };
 
 // =========================================================
@@ -225,8 +277,8 @@ export const cancelOrder = async (req, res) => {
 
       await order.save();
 
-      // Uncomment when refundPayment is ready
-      // await refundPayment(order);
+      // Process automatic refund via Razorpay API
+      await refundPayment(order);
     }
 
     return res.status(200).json({
@@ -371,6 +423,18 @@ export const createOrder = async (req, res) => {
         success: false,
         code: "ADDRESS_REQUIRED",
         message: "Delivery address is required",
+      });
+    }
+
+    // -------------------------------------------------------
+    // PICKUP SCHEDULE VALIDATION
+    // -------------------------------------------------------
+    const slotValidation = validatePickupSlot(pickup);
+    if (!slotValidation.valid) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_PICKUP_SLOT",
+        message: slotValidation.message,
       });
     }
 
@@ -612,19 +676,20 @@ export const createOrder = async (req, res) => {
           .toUpperCase();
 
       // Check stacking restriction:
-      // Prevent unintended stacking of promotional discounts and coupons
-      const disallowsStacking = formattedItems.some(
+      // Prevent stacking of promotional discounts and coupons
+      const hasDiscountedItems = formattedItems.some(
         (it) =>
-          it.discountAmount > 0 &&
-          it.appliedPromotion?.allowCouponStacking !== true
+          Number(it.discountAmount) > 0 ||
+          Boolean(it.appliedPromotion) ||
+          (it.originalPrice && it.finalPrice < it.originalPrice)
       );
 
-      if (promotionalDiscount > 0 && disallowsStacking) {
+      if (promotionalDiscount > 0 || hasDiscountedItems) {
         return res.status(400).json({
           success: false,
           code: "PROMOTION_NO_STACKING",
           message:
-            "Coupons cannot be combined with promotional discounts",
+            "Coupons cannot be applied to already discounted items",
         });
       }
 
@@ -685,6 +750,132 @@ export const createOrder = async (req, res) => {
         ) / 100,
         0
       );
+
+    // =======================================================
+    // PRICE CHANGE / PROMOTION DESYNC DETECTION
+    // =======================================================
+    // If client provided total or expectedTotal and it significantly differs (> 1 INR)
+    // from database-calculated finalAmount, notify client with latest calculated details
+    const clientExpectedTotal = Number(req.body.total ?? req.body.expectedTotal);
+    if (Number.isFinite(clientExpectedTotal) && clientExpectedTotal > 0) {
+      const diff = Math.abs(clientExpectedTotal - finalAmount);
+      if (diff > 1.0) {
+        return res.status(409).json({
+          success: false,
+          code: "PRICE_CHANGED",
+          message:
+            "Item pricing or active promotional discounts have updated. Your cart total has been refreshed.",
+          previousTotal: clientExpectedTotal,
+          latestTotal: finalAmount,
+          discountedSubtotal,
+          promotionalDiscount,
+          deliveryFee: serverDeliveryFee,
+          handlingFee,
+          discount,
+        });
+      }
+    }
+
+    // =======================================================
+    // IDEMPOTENCY / PREVENT RAPID DUPLICATE ORDER CREATION
+    // =======================================================
+    const fifteenSecondsAgo = new Date(Date.now() - 15000);
+    const recentDuplicateOrder = await Order.findOne({
+      customerId: userId,
+      createdAt: { $gte: fifteenSecondsAgo },
+      "pickup.date": pickup?.date,
+      "pickup.time": pickup?.time,
+      total: finalAmount,
+    });
+
+    if (recentDuplicateOrder) {
+      console.log(
+        `Rapid duplicate order creation caught for user ${userId}. Returning existing order ${recentDuplicateOrder.orderId}`
+      );
+      return res.status(200).json({
+        success: true,
+        message: "Order already placed successfully",
+        data: recentDuplicateOrder,
+      });
+    }
+
+    // =======================================================
+    // ONLINE PAYMENT VALIDATION (PREVENT UNPAID ONLINE ORDERS)
+    // =======================================================
+    let paymentStatus = "pending";
+    const razorpayPaymentId =
+      payment?.razorpayPaymentId || payment?.transactionId || null;
+    const razorpayOrderId = payment?.razorpayOrderId || null;
+    const razorpaySignature = payment?.razorpaySignature || null;
+
+    if (payment?.method === "ONLINE") {
+      if (!razorpayPaymentId || !razorpayOrderId || !razorpaySignature) {
+        return res.status(400).json({
+          success: false,
+          code: "PAYMENT_DETAILS_REQUIRED",
+          message: "Payment verification details are required for online orders",
+        });
+      }
+
+      // 1. Verify HMAC SHA-256 signature
+      const body = razorpayOrderId + "|" + razorpayPaymentId;
+      const expectedSignature = crypto
+        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET || "dummy_secret")
+        .update(body)
+        .digest("hex");
+
+      if (expectedSignature !== razorpaySignature) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_PAYMENT_SIGNATURE",
+          message: "Payment signature verification failed",
+        });
+      }
+
+      // 2. Replay attack prevention: Ensure paymentId is not already attached to another order
+      const existingPaymentOrder = await Order.findOne({
+        $or: [
+          { "payment.razorpayPaymentId": razorpayPaymentId },
+          { "payment.transactionId": razorpayPaymentId },
+        ],
+      });
+
+      if (existingPaymentOrder) {
+        return res.status(400).json({
+          success: false,
+          code: "PAYMENT_ALREADY_USED",
+          message: "This payment has already been associated with an order",
+        });
+      }
+
+      // 3. Verify payment with Razorpay API (status and amount)
+      try {
+        const paymentDetails = await razorpay.payments.fetch(razorpayPaymentId);
+        if (
+          !paymentDetails ||
+          (paymentDetails.status !== "captured" && paymentDetails.status !== "authorized")
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: "PAYMENT_NOT_CAPTURED",
+            message: `Payment is not confirmed (status: ${paymentDetails?.status || "unknown"})`,
+          });
+        }
+
+        const expectedPaise = Math.round(Number(finalAmount) * 100);
+        if (Number(paymentDetails.amount) < expectedPaise) {
+          return res.status(400).json({
+            success: false,
+            code: "PAYMENT_AMOUNT_MISMATCH",
+            message: "Paid amount does not match required order total",
+          });
+        }
+      } catch (fetchErr) {
+        console.warn("Warning: Could not fetch payment details from Razorpay API:", fetchErr.message);
+      }
+
+      paymentStatus = "paid";
+    }
 
     // =======================================================
     // ORDER ID
@@ -806,15 +997,25 @@ export const createOrder = async (req, res) => {
             "COD",
 
           status:
-            payment?.status ||
-            "pending",
+            paymentStatus,
 
           amount:
             finalAmount,
 
+          transactionId:
+            razorpayPaymentId,
+
           razorpayPaymentId:
-            payment?.razorpayPaymentId ||
-            null,
+            razorpayPaymentId,
+
+          razorpayOrderId:
+            razorpayOrderId,
+
+          razorpaySignature:
+            razorpaySignature,
+
+          paidAt:
+            paymentStatus === "paid" ? new Date() : null,
         },
 
         meta: {
@@ -834,9 +1035,12 @@ export const createOrder = async (req, res) => {
             changedAt:
               new Date(),
 
-            note: appliedCoupon
-              ? `Order created with coupon ${appliedCoupon.code}`
-              : "Order created",
+            note:
+              paymentStatus === "paid"
+                ? `Order created - Online payment verified via Razorpay (Payment ID: ${razorpayPaymentId})`
+                : appliedCoupon
+                ? `Order created with coupon ${appliedCoupon.code}`
+                : "Order created",
           },
         ],
       });
@@ -1059,42 +1263,47 @@ export const createOrder = async (req, res) => {
     // Invalidate available coupons cache for customer
     await delCachePattern(`coupons:available:${userId}:*`);
 
-    // Dispatch Telegram Alert via BullMQ queue (fallback to background task if Redis offline)
-    dispatchJob(
-      notificationQueue,
-      "send-telegram-order-alert",
-      { order: orderData },
-      async (data) => {
-        try {
-          await sendTelegramAlert(data.order);
-        } catch (tgErr) {
-          console.error("TELEGRAM ALERT FALLBACK ERROR:", tgErr.message);
-        }
-      },
-      { jobId: `tg-${orderData.orderId || order._id}` }
-    ).catch((err) => console.error("Error dispatching telegram job:", err.message));
+    const isConfirmedOrder =
+      order.payment?.method === "COD" || order.payment?.status === "paid";
 
-    // Dispatch Confirmation Email via BullMQ queue (fallback to background task if Redis offline)
-    if (order.customerEmail) {
+    if (isConfirmedOrder) {
+      // Dispatch Telegram Alert via BullMQ queue (fallback to background task if Redis offline)
       dispatchJob(
-        emailQueue,
-        "send-order-placed-email",
+        notificationQueue,
+        "send-telegram-order-alert",
         { order: orderData },
         async (data) => {
           try {
-            await sendEmail({
-              to: data.order.customerEmail,
-              from: process.env.ORDER_MAIL || process.env.MAIL_FROM,
-              subject: `Your Zusko Order #${data.order.orderId} is Confirmed 🎉`,
-              html: generateOrderPlacedEmail(data.order),
-            });
-            console.log(`Order confirmation email sent to ${data.order.customerEmail}`);
-          } catch (emailErr) {
-            console.error("Order confirmation email fallback failed:", emailErr.message);
+            await sendTelegramAlert(data.order);
+          } catch (tgErr) {
+            console.error("TELEGRAM ALERT FALLBACK ERROR:", tgErr.message);
           }
         },
-        { jobId: `email-${orderData.orderId || order._id}` }
-      ).catch((err) => console.error("Error dispatching email job:", err.message));
+        { jobId: `tg-${orderData.orderId || order._id}` }
+      ).catch((err) => console.error("Error dispatching telegram job:", err.message));
+
+      // Dispatch Confirmation Email via BullMQ queue (fallback to background task if Redis offline)
+      if (order.customerEmail) {
+        dispatchJob(
+          emailQueue,
+          "send-order-placed-email",
+          { order: orderData },
+          async (data) => {
+            try {
+              await sendEmail({
+                to: data.order.customerEmail,
+                from: process.env.ORDER_MAIL || process.env.MAIL_FROM,
+                subject: `Your Zusko Order #${data.order.orderId} is Confirmed 🎉`,
+                html: generateOrderPlacedEmail(data.order),
+              });
+              console.log(`Order confirmation email sent to ${data.order.customerEmail}`);
+            } catch (emailErr) {
+              console.error("Order confirmation email fallback failed:", emailErr.message);
+            }
+          },
+          { jobId: `email-${orderData.orderId || order._id}` }
+        ).catch((err) => console.error("Error dispatching email job:", err.message));
+      }
     }
 
     // =======================================================
