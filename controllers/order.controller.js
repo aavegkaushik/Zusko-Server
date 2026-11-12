@@ -1,4 +1,5 @@
 import Order from "../models/order.model.js";
+import DeliveryPartner from "../models/DeliveryPartner.js";
 import { sendTelegramAlert } from "../services/telegramService.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { generateOrderPlacedEmail, generateOrderCancelledEmail } from "../utils/orderEmails.js";
@@ -86,6 +87,43 @@ export const validatePickupSlot = (pickup) => {
   return { valid: true };
 };
 
+// Helper to format strictly public partner info (Full Name, Avatar, Mobile Number)
+const formatPublicPartner = (partnerDoc) => {
+  if (!partnerDoc) return null;
+  return {
+    fullName: partnerDoc.fullName || "",
+    avatar: partnerDoc.avatar || "",
+    mobileNumber: partnerDoc.mobileNumber || "",
+  };
+};
+
+const formatPartnerAssignment = (assignment, legacyAgent = null) => {
+  if (assignment && assignment.partnerId) {
+    const p = assignment.partnerId;
+    return {
+      partner: formatPublicPartner(p),
+      assignedAt: assignment.assignedAt || null,
+      status: assignment.status || "assigned",
+      pickedUpAt: assignment.pickedUpAt || null,
+      deliveredAt: assignment.deliveredAt || null,
+    };
+  }
+  if (legacyAgent && (legacyAgent.name || legacyAgent.phone)) {
+    return {
+      partner: {
+        fullName: legacyAgent.name || "",
+        avatar: "",
+        mobileNumber: legacyAgent.phone || "",
+      },
+      assignedAt: null,
+      status: "assigned",
+      pickedUpAt: null,
+      deliveredAt: null,
+    };
+  }
+  return null;
+};
+
 // =========================================================
 // GET ACTIVE ORDERS
 // =========================================================
@@ -96,12 +134,22 @@ export const getActiveOrders = async (req, res) => {
       status: {
         $nin: ["completed", "cancelled"],
       },
-    }).sort({ createdAt: -1 }).lean();
+    })
+      .populate("pickupPartner.partnerId", "fullName avatar mobileNumber")
+      .populate("deliveryPartner.partnerId", "fullName avatar mobileNumber")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const sanitizedOrders = orders.map((order) => ({
+      ...order,
+      pickupPartner: formatPartnerAssignment(order.pickupPartner),
+      deliveryPartner: formatPartnerAssignment(order.deliveryPartner, order.deliveryAgent),
+    }));
 
     return res.status(200).json({
       success: true,
-      count: orders.length,
-      data: orders,
+      count: sanitizedOrders.length,
+      data: sanitizedOrders,
     });
   } catch (error) {
     return res.status(500).json({
@@ -122,12 +170,22 @@ export const getOrderHistory = async (req, res) => {
       status: {
         $in: ["completed", "cancelled"],
       },
-    }).sort({ createdAt: -1 }).lean();
+    })
+      .populate("pickupPartner.partnerId", "fullName avatar mobileNumber")
+      .populate("deliveryPartner.partnerId", "fullName avatar mobileNumber")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const sanitizedOrders = orders.map((order) => ({
+      ...order,
+      pickupPartner: formatPartnerAssignment(order.pickupPartner),
+      deliveryPartner: formatPartnerAssignment(order.deliveryPartner, order.deliveryAgent),
+    }));
 
     return res.status(200).json({
       success: true,
-      count: orders.length,
-      data: orders,
+      count: sanitizedOrders.length,
+      data: sanitizedOrders,
     });
   } catch (error) {
     return res.status(500).json({
@@ -152,7 +210,7 @@ export const getOrderTracking = async (req, res) => {
 
     const trackingCacheKey = `tracking:${req.params.id}`;
 
-    // Fast Redis read cache (20s TTL)
+    // Fast Redis read cache (15s TTL)
     const cachedData = await getCache(trackingCacheKey);
     if (cachedData) {
       return res.status(200).json({
@@ -164,7 +222,10 @@ export const getOrderTracking = async (req, res) => {
     const order = await Order.findOne({
       _id: req.params.id,
       ...getUserOrderCriteria(req.user),
-    }).lean();
+    })
+      .populate("pickupPartner.partnerId", "fullName avatar mobileNumber")
+      .populate("deliveryPartner.partnerId", "fullName avatar mobileNumber")
+      .lean();
 
     if (!order) {
       return res.status(404).json({
@@ -172,6 +233,9 @@ export const getOrderTracking = async (req, res) => {
         message: "Order not found",
       });
     }
+
+    const pickupPartnerData = formatPartnerAssignment(order.pickupPartner);
+    const deliveryPartnerData = formatPartnerAssignment(order.deliveryPartner, order.deliveryAgent);
 
     const trackingData = {
       _id: order._id,
@@ -205,13 +269,16 @@ export const getOrderTracking = async (req, res) => {
 
       estimatedDelivery: order.estimatedDelivery || null,
 
+      pickupPartner: pickupPartnerData,
+      deliveryPartner: deliveryPartnerData,
+
       deliveryAgent: order.deliveryAgent || null,
 
       createdAt: order.createdAt,
     };
 
-    // Cache tracking data with short TTL (20 seconds)
-    await setCache(trackingCacheKey, trackingData, 20);
+    // Cache tracking data with short TTL (15 seconds)
+    await setCache(trackingCacheKey, trackingData, 15);
 
     return res.status(200).json({
       success: true,

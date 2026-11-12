@@ -25,6 +25,7 @@ router.post("/create", protect, createOrder);
 
 // Single Order Operations
 router.get("/:id", protect, getOrderTracking);
+router.get("/:id/tracking", protect, getOrderTracking);
 router.patch("/:id/cancel", protect, cancelOrder);
 router.post("/:id/rate", protect, rateOrder);
 
