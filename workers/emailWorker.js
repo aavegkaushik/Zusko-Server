@@ -1,7 +1,7 @@
 import { Worker } from "bullmq";
 import { queueConnectionOptions } from "../queues/queueManager.js";
 import { sendEmail } from "../utils/sendEmail.js";
-import { generateOrderPlacedEmail } from "../utils/orderEmails.js";
+import { generateOrderPlacedEmail, generateOrderCancelledEmail } from "../utils/orderEmails.js";
 import logger from "../utils/logger.js";
 
 export const createEmailWorker = () => {
@@ -24,7 +24,22 @@ export const createEmailWorker = () => {
           html: generateOrderPlacedEmail(order),
         });
 
-        logger.info(`Queue completed: [zusko-user-email] sent order email to ${order.customerEmail}`);
+        logger.info(`Queue completed: [zusko-user-email] sent order confirmation email to ${order.customerEmail}`);
+      } else if (job.name === "send-order-cancelled-email") {
+        const { order, reason } = job.data;
+        if (!order || !order.customerEmail) {
+          logger.warn(`Skipping email job ${job.id}: missing customer email`);
+          return;
+        }
+
+        await sendEmail({
+          to: order.customerEmail,
+          from: process.env.ORDER_MAIL || process.env.MAIL_FROM,
+          subject: `Important: Your Zusko Order #${order.orderId || order._id} Has Been Cancelled`,
+          html: generateOrderCancelledEmail(order, reason),
+        });
+
+        logger.info(`Queue completed: [zusko-user-email] sent order cancellation email to ${order.customerEmail}`);
       } else if (job.name === "send-custom-email") {
         const { to, subject, html, from } = job.data;
         await sendEmail({ to, subject, html, from });

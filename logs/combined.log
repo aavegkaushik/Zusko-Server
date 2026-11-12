@@ -62,3 +62,63 @@
 {"level":"warn","message":"Redis unavailable for background queues. Fallback handlers active for email and notification delivery.","timestamp":"2026-11-09T19:23:02.433Z"}
 {"level":"info","message":"MongoDB connected: ac-e9a0cky-shard-00-00.oq1eicl.mongodb.net","timestamp":"2026-11-09T19:23:02.987Z"}
 {"level":"info","message":"Server running on port 5000","timestamp":"2026-11-09T19:23:02.993Z"}
+{"level":"warn","message":"MongoDB disconnected","timestamp":"2026-11-09T20:19:56.942Z"}
+{"level":"info","message":"MongoDB reconnected","timestamp":"2026-11-09T20:19:57.278Z"}
+{"level":"warn","message":"MongoDB disconnected","timestamp":"2026-11-09T20:28:53.489Z"}
+{"level":"info","message":"MongoDB reconnected","timestamp":"2026-11-09T20:29:03.645Z"}
+{"level":"info","message":"MongoDB reconnected","timestamp":"2026-11-09T20:48:26.304Z"}
+{"level":"warn","message":"Redis connection error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:05.387Z"}
+{"level":"warn","message":"EmailQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:05.403Z"}
+{"level":"warn","message":"NotificationQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:05.404Z"}
+{"level":"warn","message":"InvoiceQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:05.405Z"}
+{"level":"warn","message":"InvoiceQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:08.424Z"}
+{"level":"warn","message":"NotificationQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:08.424Z"}
+{"level":"warn","message":"EmailQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:08.425Z"}
+{"level":"warn","message":"Redis connection error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:08.425Z"}
+{"level":"warn","message":"Redis connection error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:11.444Z"}
+{"level":"warn","message":"EmailQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:11.446Z"}
+{"level":"warn","message":"NotificationQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:11.447Z"}
+{"level":"warn","message":"InvoiceQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:11.448Z"}
+{"level":"warn","message":"InvoiceQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:14.459Z"}
+{"level":"warn","message":"NotificationQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:14.460Z"}
+{"level":"warn","message":"EmailQueue error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:14.460Z"}
+{"level":"warn","message":"Redis connection error: connect EACCES 127.0.0.1:6379","timestamp":"2026-11-12T04:46:14.460Z"}
+{"level":"warn","message":"Redis is not running on redis://127.0.0.1:6379. Running in graceful fallback mode (MongoDB Atlas source of truth).","timestamp":"2026-11-12T04:52:46.790Z"}
+{"level":"warn","message":"Redis is not running on redis://127.0.0.1:6379. Running in graceful fallback mode (MongoDB Atlas source of truth).","timestamp":"2026-11-12T04:53:22.613Z"}
+{"level":"warn","message":"Redis unavailable for background queues. Fallback handlers active for email and notification delivery.","timestamp":"2026-11-12T04:53:22.625Z"}
+{"level":"info","message":"MongoDB connected: ac-e9a0cky-shard-00-00.oq1eicl.mongodb.net (pool: 10-100)","timestamp":"2026-11-12T04:53:23.435Z"}
+{"level":"info","message":"Server running on port 5000","timestamp":"2026-11-12T04:53:23.460Z"}
+{"level":"warn","message":"Redis is not running on redis://127.0.0.1:6379. Running in graceful fallback mode (MongoDB Atlas source of truth).","timestamp":"2026-11-12T04:53:53.982Z"}
+{"level":"warn","message":"Redis unavailable for background queues. Fallback handlers active for email and notification delivery.","timestamp":"2026-11-12T04:53:53.996Z"}
+{"level":"info","message":"MongoDB connected: ac-e9a0cky-shard-00-00.oq1eicl.mongodb.net (pool: 10-100)","timestamp":"2026-11-12T04:53:54.707Z"}
+{"level":"info","message":"Server running on port 5000 [PID: 26612]","timestamp":"2026-11-12T04:53:54.741Z"}
+{"level":"warn","message":"Redis is not running on redis://127.0.0.1:6379. Running in graceful fallback mode (MongoDB Atlas source of truth).","timestamp":"2026-11-12T04:54:45.774Z"}
+{"level":"warn","message":"Redis unavailable for background queues. Fallback handlers active for email and notification delivery.","timestamp":"2026-11-12T04:54:45.786Z"}
+{"level":"info","message":"MongoDB connected: ac-e9a0cky-shard-00-00.oq1eicl.mongodb.net (pool: 10-100)","timestamp":"2026-11-12T04:54:46.485Z"}
+{"level":"info","message":"Server running on port 5000 [PID: 27260]","timestamp":"2026-11-12T04:54:46.505Z"}
+{"level":"warn","message":"Redis is not running on redis://127.0.0.1:6379. Running in graceful fallback mode (MongoDB Atlas source of truth).","timestamp":"2026-11-12T05:12:00.454Z"}
+{"level":"warn","message":"Redis unavailable for background queues. Fallback handlers active for email and notification delivery.","timestamp":"2026-11-12T05:12:00.468Z"}
+{"level":"info","message":"MongoDB connected: ac-e9a0cky-shard-00-00.oq1eicl.mongodb.net (pool: 10-100)","timestamp":"2026-11-12T05:12:01.178Z"}
+{"level":"info","message":"Server running on port 5000 [PID: 14248]","timestamp":"2026-11-12T05:12:01.193Z"}
+{"level":"warn","message":"Redis is not running on redis://127.0.0.1:6379. Running in graceful fallback mode (MongoDB Atlas source of truth).","timestamp":"2026-11-12T05:12:10.136Z"}
+{"level":"warn","message":"Redis unavailable for background queues. Fallback handlers active for email and notification delivery.","timestamp":"2026-11-12T05:12:10.142Z"}
+{"level":"info","message":"MongoDB connected: ac-e9a0cky-shard-00-00.oq1eicl.mongodb.net (pool: 10-100)","timestamp":"2026-11-12T05:12:10.732Z"}
+{"level":"info","message":"Server running on port 5000 [PID: 18456]","timestamp":"2026-11-12T05:12:10.748Z"}
+{"level":"warn","message":"Redis is not running on redis://127.0.0.1:6379. Running in graceful fallback mode (MongoDB Atlas source of truth).","timestamp":"2026-11-12T05:12:43.708Z"}
+{"level":"warn","message":"Redis unavailable for background queues. Fallback handlers active for email and notification delivery.","timestamp":"2026-11-12T05:12:43.719Z"}
+{"level":"info","message":"MongoDB connected: ac-e9a0cky-shard-00-00.oq1eicl.mongodb.net (pool: 10-100)","timestamp":"2026-11-12T05:12:44.318Z"}
+{"level":"info","message":"Server running on port 5000 [PID: 23476]","timestamp":"2026-11-12T05:12:44.333Z"}
+{"level":"warn","message":"Redis is not running on redis://127.0.0.1:6379. Running in graceful fallback mode (MongoDB Atlas source of truth).","timestamp":"2026-11-12T05:13:27.577Z"}
+{"level":"warn","message":"Redis unavailable for background queues. Fallback handlers active for email and notification delivery.","timestamp":"2026-11-12T05:13:27.584Z"}
+{"level":"info","message":"MongoDB connected: ac-e9a0cky-shard-00-00.oq1eicl.mongodb.net (pool: 10-100)","timestamp":"2026-11-12T05:13:28.197Z"}
+{"level":"info","message":"Server running on port 5000 [PID: 19124]","timestamp":"2026-11-12T05:13:28.221Z"}
+{"level":"warn","message":"Redis is not running on redis://127.0.0.1:6379. Running in graceful fallback mode (MongoDB Atlas source of truth).","timestamp":"2026-11-12T05:13:43.261Z"}
+{"level":"warn","message":"Redis unavailable for background queues. Fallback handlers active for email and notification delivery.","timestamp":"2026-11-12T05:13:43.267Z"}
+{"level":"info","message":"MongoDB connected: ac-e9a0cky-shard-00-00.oq1eicl.mongodb.net (pool: 10-100)","timestamp":"2026-11-12T05:13:43.883Z"}
+{"level":"info","message":"Server running on port 5000 [PID: 25540]","timestamp":"2026-11-12T05:13:43.899Z"}
+{"level":"warn","message":"Redis is not running on redis://127.0.0.1:6379. Running in graceful fallback mode (MongoDB Atlas source of truth).","timestamp":"2026-11-12T05:14:19.210Z"}
+{"level":"warn","message":"Redis unavailable for background queues. Fallback handlers active for email and notification delivery.","timestamp":"2026-11-12T05:14:19.221Z"}
+{"level":"info","message":"MongoDB connected: ac-e9a0cky-shard-00-00.oq1eicl.mongodb.net (pool: 10-100)","timestamp":"2026-11-12T05:14:19.916Z"}
+{"level":"info","message":"Server running on port 5000 [PID: 23436]","timestamp":"2026-11-12T05:14:19.932Z"}
+{"level":"warn","message":"Telegram alert skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured","timestamp":"2026-11-12T05:16:40.938Z"}
+{"level":"warn","message":"Telegram alert skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured","timestamp":"2026-11-12T05:19:09.718Z"}

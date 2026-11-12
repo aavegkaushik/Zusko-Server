@@ -1,7 +1,7 @@
 import Order from "../models/order.model.js";
 import { sendTelegramAlert } from "../services/telegramService.js";
 import { sendEmail } from "../utils/sendEmail.js";
-import { generateOrderPlacedEmail } from "../utils/orderEmails.js";
+import { generateOrderPlacedEmail, generateOrderCancelledEmail } from "../utils/orderEmails.js";
 import Coupon from "../models/coupon.model.js";
 import CouponUsage from "../models/couponUsage.model.js";
 import { checkEligibility } from "./coupon.controller.js";
@@ -18,6 +18,7 @@ import {
 import mongoose from "mongoose";
 import crypto from "crypto";
 import { refundPayment, razorpay } from "./payment.controller.js";
+import logger from "../utils/logger.js";
 
 
 // Helper to query user orders safely whether phone is set or empty
@@ -142,6 +143,13 @@ export const getOrderHistory = async (req, res) => {
 // =========================================================
 export const getOrderTracking = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID format",
+      });
+    }
+
     const trackingCacheKey = `tracking:${req.params.id}`;
 
     // Fast Redis read cache (20s TTL)
@@ -218,15 +226,67 @@ export const getOrderTracking = async (req, res) => {
 };
 
 
+// Helper to dispatch cancellation email to user via BullMQ queue (with background fallback)
+export const dispatchCancellationEmail = async (order, reason = "") => {
+  if (!order || !order.customerEmail) {
+    logger.warn("Cannot dispatch cancellation email: missing customerEmail", {
+      orderId: order?.orderId || order?._id,
+    });
+    return;
+  }
+
+  const orderData = order.toObject ? order.toObject() : order;
+  const subject = `Important: Your Zusko Order #${orderData.orderId || orderData._id} Has Been Cancelled`;
+
+  dispatchJob(
+    emailQueue,
+    "send-order-cancelled-email",
+    { order: orderData, reason },
+    async (data) => {
+      try {
+        await sendEmail({
+          to: data.order.customerEmail,
+          from: process.env.ORDER_MAIL || process.env.MAIL_FROM,
+          subject,
+          html: generateOrderCancelledEmail(data.order, data.reason),
+        });
+        logger.info(`Order cancellation email sent to ${data.order.customerEmail}`);
+      } catch (emailErr) {
+        logger.error(`Order cancellation email fallback failed: ${emailErr.message}`);
+      }
+    },
+    { jobId: `cancel-email-${orderData.orderId || orderData._id}-${Date.now()}` }
+  ).catch((err) => logger.error(`Error dispatching cancellation email job: ${err.message}`));
+};
+
 // =========================================================
 // CANCEL ORDER
 // =========================================================
 export const cancelOrder = async (req, res) => {
   try {
-    const order = await Order.findOne({
-      _id: req.params.id,
-      ...getUserOrderCriteria(req.user),
-    });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID format",
+      });
+    }
+
+    // Identify whether cancellation was triggered by the company/admin or by the customer
+    const isCompanyCancellation =
+      req.user?.role === "admin" ||
+      req.body?.cancelledBy === "company" ||
+      req.body?.cancelledBy === "admin" ||
+      req.body?.by === "company" ||
+      req.body?.by === "admin";
+
+    const reason = req.body?.reason || req.body?.cancellationReason || "";
+
+    // Company/admin can cancel any order globally; customer can only cancel their own order
+    const query = isCompanyCancellation
+      ? { _id: req.params.id }
+      : { _id: req.params.id, ...getUserOrderCriteria(req.user) };
+
+    const order = await Order.findOne(query);
 
     if (!order) {
       return res.status(404).json({
@@ -235,19 +295,35 @@ export const cancelOrder = async (req, res) => {
       });
     }
 
-    // Order cannot be cancelled after processing starts
-    if (
-      [
-        "in-progress",
-        "ready-for-delivery",
-        "out-for-delivery",
-        "completed",
-      ].includes(order.status)
-    ) {
+    if (order.status === "cancelled") {
       return res.status(400).json({
         success: false,
-        message: "Order cannot be cancelled now",
+        message: "Order is already cancelled",
       });
+    }
+
+    // Business rule: Customer cannot cancel after processing starts
+    if (!isCompanyCancellation) {
+      if (
+        [
+          "in-progress",
+          "ready-for-delivery",
+          "out-for-delivery",
+          "completed",
+        ].includes(order.status)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Order cannot be cancelled now",
+        });
+      }
+    } else {
+      if (order.status === "completed") {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot cancel an already completed order",
+        });
+      }
     }
 
     order.status = "cancelled";
@@ -256,18 +332,30 @@ export const cancelOrder = async (req, res) => {
       order.history = [];
     }
 
+    const note = isCompanyCancellation
+      ? `Cancelled by company${reason ? `: ${reason}` : ""}`
+      : `Cancelled by customer${reason ? `: ${reason}` : ""}`;
+
     order.history.push({
       status: "cancelled",
       changedAt: new Date(),
-      note: "Cancelled by customer",
+      note,
     });
+
+    if (!order.meta) {
+      order.meta = {};
+    }
+    order.meta.cancelledBy = isCompanyCancellation ? "company" : "customer";
+    if (reason) {
+      order.meta.cancellationReason = reason;
+    }
 
     await order.save();
 
     // Invalidate tracking cache on cancellation
     await delCache(`tracking:${req.params.id}`);
 
-    // Refund handling
+    // Refund handling if already paid online
     if (order.payment?.status === "paid") {
       order.refund = {
         status: "processing",
@@ -281,9 +369,86 @@ export const cancelOrder = async (req, res) => {
       await refundPayment(order);
     }
 
+    // CRITICAL: Send cancellation email ONLY when cancelled by company (NOT when user cancels themselves)
+    if (isCompanyCancellation && order.customerEmail) {
+      dispatchCancellationEmail(order, reason);
+    }
+
     return res.status(200).json({
       success: true,
-      message: "Order cancelled successfully",
+      message: isCompanyCancellation
+        ? "Order cancelled by company successfully. Customer has been notified via email."
+        : "Order cancelled successfully",
+      data: order,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// =========================================================
+// CANCEL ORDER BY COMPANY (ADMIN ROUTE)
+// =========================================================
+export const cancelOrderByCompany = async (req, res) => {
+  req.body = req.body || {};
+  req.body.cancelledBy = "company";
+  return cancelOrder(req, res);
+};
+
+// =========================================================
+// UPDATE ORDER STATUS (ADMIN ROUTE)
+// =========================================================
+export const updateOrderStatus = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID format",
+      });
+    }
+
+    const { status, note, reason } = req.body;
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
+    }
+
+    // If company changes status to cancelled, route to cancellation handler (which triggers email + refund)
+    if (status === "cancelled") {
+      req.body.cancelledBy = "company";
+      req.body.reason = reason || note;
+      return cancelOrder(req, res);
+    }
+
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    order.status = status;
+    if (!Array.isArray(order.history)) {
+      order.history = [];
+    }
+    order.history.push({
+      status,
+      changedAt: new Date(),
+      note: note || `Status updated to ${status} by admin`,
+    });
+
+    await order.save();
+    await delCache(`tracking:${req.params.id}`);
+
+    return res.status(200).json({
+      success: true,
+      message: `Order status updated to ${status}`,
       data: order,
     });
   } catch (error) {
@@ -300,6 +465,13 @@ export const cancelOrder = async (req, res) => {
 // =========================================================
 export const rateOrder = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID format",
+      });
+    }
+
     const { stars, review } = req.body;
 
     const order = await Order.findOne({

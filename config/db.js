@@ -6,7 +6,12 @@ dotenv.config();
 
 let isConnected = false;
 
-export const connectDB = async () => {
+const parseEnvInt = (val, defaultVal) => {
+  const parsed = parseInt(val, 10);
+  return Number.isNaN(parsed) || parsed <= 0 ? defaultVal : parsed;
+};
+
+export const connectDB = async (retries = 5, retryDelayMs = 2000) => {
   if (isConnected && mongoose.connection.readyState === 1) {
     return mongoose.connection;
   }
@@ -16,32 +21,46 @@ export const connectDB = async () => {
     throw new Error("MONGO_URI is not defined in environment variables");
   }
 
-  try {
-    const conn = await mongoose.connect(mongoUri, {
-      maxPoolSize: 20,
-      minPoolSize: 5,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-      family: 4, // IPv4
-    });
+  const options = {
+    maxPoolSize: parseEnvInt(process.env.MONGO_MAX_POOL_SIZE, 100), // Scaled to 100 for high concurrency
+    minPoolSize: parseEnvInt(process.env.MONGO_MIN_POOL_SIZE, 10), // Pre-warmed connections to absorb traffic spikes
+    maxIdleTimeMS: 30000, // Reclaim connections idle for 30s
+    waitQueueTimeoutMS: 10000, // Fail fast after 10s queue wait instead of hanging indefinitely
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+    family: 4, // IPv4
+  };
 
-    isConnected = true;
-    logger.info(`MongoDB connected: ${conn.connection.host}`);
-    return conn.connection || mongoose.connection;
-  } catch (error) {
-    logger.error(`MongoDB connection error: ${error.message}`);
-    throw error;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const conn = await mongoose.connect(mongoUri, options);
+      isConnected = true;
+      logger.info(`MongoDB connected: ${conn.connection.host} (pool: ${options.minPoolSize}-${options.maxPoolSize})`);
+      return conn.connection || mongoose.connection;
+    } catch (error) {
+      logger.error(`MongoDB connection attempt ${attempt}/${retries} failed: ${error.message}`);
+      if (attempt === retries) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
   }
 };
 
+// CRITICAL: Prevent unhandled EventEmitter 'error' crash
+mongoose.connection.on("error", (err) => {
+  isConnected = false;
+  logger.error(`MongoDB runtime connection error: ${err.message}`);
+});
+
 mongoose.connection.on("disconnected", () => {
   isConnected = false;
-  logger.warn("MongoDB disconnected");
+  logger.warn("MongoDB disconnected. Mongoose will attempt automatic reconnection.");
 });
 
 mongoose.connection.on("reconnected", () => {
   isConnected = true;
-  logger.info("MongoDB reconnected");
+  logger.info("MongoDB reconnected successfully.");
 });
 
 export const isDBConnected = () => isConnected && mongoose.connection.readyState === 1;

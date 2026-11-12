@@ -129,31 +129,32 @@ export const getDashboardSummary = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const activeOrders = await Order.countDocuments({
-      customerId: userId,
-      status: {
-        $nin: ["completed", "cancelled"],
-      },
-    });
-
-    const completedOrders = await Order.countDocuments({
-      customerId: userId,
-      status: "completed",
-    });
-
-    const totalSpentData = await Order.aggregate([
-      {
-        $match: {
-          customerId: req.user._id,
-          "payment.status": "paid",
+    // Parallelize read queries to eliminate sequential DB latency under load
+    const [activeOrders, completedOrders, totalSpentData] = await Promise.all([
+      Order.countDocuments({
+        customerId: userId,
+        status: {
+          $nin: ["completed", "cancelled"],
         },
-      },
-      {
-        $group: {
-          _id: null,
-          totalSpent: { $sum: "$total" },
+      }),
+      Order.countDocuments({
+        customerId: userId,
+        status: "completed",
+      }),
+      Order.aggregate([
+        {
+          $match: {
+            customerId: req.user._id,
+            "payment.status": "paid",
+          },
         },
-      },
+        {
+          $group: {
+            _id: null,
+            totalSpent: { $sum: "$total" },
+          },
+        },
+      ]),
     ]);
 
     const totalSpent =
